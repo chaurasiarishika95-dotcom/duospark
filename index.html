@@ -368,6 +368,19 @@ footer{background:var(--ink);color:var(--paper);padding:76px 0 30px}
 .m-sec h4::before{content:'';width:18px;height:.5px;background:var(--coral)}
 .m-cta{background:var(--ink);color:var(--paper);padding:16px 36px;display:flex;justify-content:space-between;align-items:center;gap:11px;flex-wrap:wrap}
 .m-cta .t{font-family:'Fraunces',serif;font-size:14px;flex:1;min-width:160px}
+
+/* v12 visual polish */
+.btn-beta{background:var(--coral)!important;color:var(--paper)!important;border:1px solid var(--coral)!important;box-shadow:0 8px 24px rgba(184,72,61,.22);font-weight:700;letter-spacing:.01em}
+.btn-beta:hover{background:#a83f35!important;color:var(--paper)!important;transform:translateY(-1px)}
+.da{position:relative;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(34,28,25,.05)}
+.da:after{content:'';position:absolute;inset:0;background:radial-gradient(circle at 75% 20%,rgba(255,255,255,.65),transparent 34%),linear-gradient(135deg,rgba(255,255,255,.22),transparent 55%);pointer-events:none}
+.da .ti{position:relative;z-index:1;font-size:48px;filter:drop-shadow(0 5px 8px rgba(34,28,25,.12))}
+.dc-save{transition:.18s ease}.dc-save:hover{transform:translateY(-1px)}
+.video-room{border-radius:8px;overflow:hidden;background:#151210;min-height:220px;position:relative}
+.video-room video{width:100%;height:100%;min-height:220px;object-fit:cover;display:block;background:#201b18}
+.video-local{position:absolute!important;right:10px;bottom:10px;width:105px!important;height:78px!important;min-height:78px!important;border-radius:6px;border:2px solid rgba(255,255,255,.8);box-shadow:0 5px 18px rgba(0,0,0,.3);z-index:2}
+.video-empty{min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#f7f1e8;text-align:center;padding:22px}.video-empty .ti{font-size:38px;margin-bottom:9px}.video-empty p{font-size:12px;opacity:.72;margin:0 0 14px}
+.video-status{font:10px 'DM Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--inkm);margin-top:8px}
 </style>
 </head>
 <body>
@@ -385,7 +398,7 @@ footer{background:var(--ink);color:var(--paper);padding:76px 0 30px}
       <a onclick="sc('modes')">Who it's for</a>
       <a onclick="sc('about')">About</a>
       <a class="btn btn-paper" onclick="startSignin()" style="font-size:12px;padding:9px 16px">Sign in</a>
-      <a class="btn btn-ink" onclick="startSignup()">Join the beta</a>
+      <a class="btn btn-beta" onclick="startSignup()">✨ Join the beta</a>
     </div>
   </div>
 </nav>
@@ -581,6 +594,7 @@ footer{background:var(--ink);color:var(--paper);padding:76px 0 30px}
 <div class="modal-ov" id="mkt-modal"><div class="modal" id="mkt-modal-body"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 // ============================================================
 // DATA LIBRARY
@@ -2187,6 +2201,39 @@ var DATES = {
 
 };
 
+
+// ============================================================
+// EXCEL DATE LIBRARY — runtime source of truth for date metadata
+// ============================================================
+var DATE_KEY_ALIASES={
+  '36-questions':'36questions','50-questions':'pre-wedding-questions','aarey-cycling':'aarey','bandra-cafe-hop':'cafe-hop','focaccia-art':'focaccia-date','holi-colours':'holi-colors','honeymoon-vision':'wedding-vision','incense':'incense-sticks','mother-tongue-lesson':'mother-tongue','movie-marathon':'movie-night','pottery-clay':'pottery','vision-board':'vision-board-craft'
+};
+function csvList(v){return String(v==null?'':v).split(',').map(function(x){return x.trim();}).filter(Boolean);}
+function excelDateToApp(row){
+  var key=String(row['Key']||'').trim(); if(!key)return null; var target=DATE_KEY_ALIASES[key]||key; var d=DATES[target]||{};
+  var suitable=csvList(row['Suitable For (all modes)']||row['Primary Mode']||d.suitableFor);
+  var city=String(row['City']||'any').trim().toLowerCase();
+  d.title=String(row['Title']||d.title||key); d.mode=String(row['Primary Mode']||d.mode||'living-together').trim();
+  d.suitableFor=suitable.length?suitable:d.suitableFor||['living-together']; d.setting=String(row['Setting']||d.setting||'at-home').trim();
+  d.budgetBracket=String(row['Budget Bracket']||d.budgetBracket||'mid').trim().toLowerCase(); d.energy=String(row['Energy Level']||d.energy||'medium').trim().toLowerCase();
+  d.dayFit=String(row['Day Fit']||d.dayFit||'either').trim().toLowerCase(); d.weather=String(row['Weather']||d.weather||'either').trim().toLowerCase();
+  d.city=city==='any'?['any']:csvList(city); d.festival=String(row['Festival Tag']||'').trim()?csvList(row['Festival Tag']):null;
+  d.diet=String(row['Diet']||d.diet||'any').trim().toLowerCase(); d.bestFor=String(row['Best For']||d.bestFor||'both').trim().toLowerCase();
+  d.missing=csvList(row['Missing Addresses']||''); d.time=String(row['Time Needed']||d.time||'—'); d.cost=String(row['Cost Each']||d.cost||'—');
+  d.vibe=String(row['Vibe']||d.vibe||'Date night'); d.tags=csvList(row['Tags']||d.tags||''); d.desc=String(row['Description']||d.desc||''); d.excelSource=true; d.key=target;
+  if(!d.icon)d.icon='ti-heart'; if(!d.artClass)d.artClass='coral'; if(!d.shopping)d.shopping=[]; if(!d.video)d.video={title:'Find on YouTube',source:'YouTube',url:'https://www.youtube.com/results?search_query='+encodeURIComponent(d.title)}; if(!d.preflight)d.preflight=[]; if(!d.steps)d.steps=[{text:d.desc,time:d.time}];
+  DATES[target]=d; return target;
+}
+async function loadDateLibraryFromExcel(){
+  try{
+    if(!window.XLSX)return false;
+    var res=await fetch('DuoSpark_Date_Library.xlsx',{cache:'no-store'}); if(!res.ok)throw new Error('Excel file unavailable');
+    var buf=await res.arrayBuffer(); var wb=XLSX.read(buf,{type:'array'}); var ws=wb.Sheets['Date Library']||wb.Sheets[wb.SheetNames[0]];
+    var rows=XLSX.utils.sheet_to_json(ws,{defval:''}); rows.forEach(excelDateToApp);
+    DATE_LIBRARY_SOURCE='DuoSpark_Date_Library.xlsx · live runtime load · '+rows.length+' records';
+    return true;
+  }catch(e){console.warn('Excel date library load failed; using embedded fallback.',e);DATE_LIBRARY_SOURCE='DuoSpark_Date_Library.xlsx · embedded fallback';return false;}
+}
 var DATE_LIBRARY_SOURCE='DuoSpark_Date_Library.xlsx · 128 records · embedded at build time';
 var DAILY_SPARKS = ["What's one small thing your partner did this week that made you smile?","What's a song that reminds you of them right now?","If you could plan a surprise for next weekend, what would it be?","What's something you love about them that you've never told them?","When did you last feel really proud of them?","What's a quiet moment you remember from this week?","What does 'home' feel like with them?","What's one thing you're looking forward to doing together?","If you had a free day tomorrow, what would you do as a couple?","What's a small fear you'd want them to know about?"];
 var FLAVORS = {'ck':['The Cozy Adventurers','You build with your hands and feed your hearts.'],'cd':['The Slow Burners','Long meals, longer conversations.'],'md':['The Tender Makers','You build something together — a meal, a memory, a moment.'],'mc':['The Sunday Stayers',"You don't need plans. You need each other and snacks."],'tf':['The Wanderers','New places, new flavors. You collect experiences together.'],'wd':['The Long Walkers','You think out loud, side by side.'],'gp':['The Playful Pair',"You bring out each other's mischief."],'df':['The Quiet Romantics','Love in small gestures.']};
@@ -2440,7 +2487,7 @@ function openMktModal(key){
     '<div class="m-sec"><h4>Recipe video to watch friday</h4><a href="'+d.video.url+'" target="_blank" class="vl"><i class="ti ti-player-play"></i><div><strong>'+he(d.video.title)+'</strong><span>'+he(d.video.source)+'</span></div></a></div>'+
     '<div class="m-sec"><h4>Pre-flight (15 min before)</h4><ul class="pre-l">'+d.preflight.map(function(p){return'<li><i class="ti ti-check"></i> '+he(p)+'</li>';}).join('')+'</ul></div>'+
     '<div class="m-sec"><h4>Step by step</h4><div class="rst">'+d.steps.map(function(s){return'<div class="rs"><div><div class="rs-t">'+he(s.text)+'</div>'+(s.time!=='—'?'<div class="rs-ti">'+he(s.time)+'</div>':'')+'</div></div>';}).join('')+'</div></div>'+
-    '</div><div class="m-cta"><div class="t">Want this delivered every week?</div><button class="btn btn-coral" onclick="closeMktModal();startSignup()">Join the beta</button></div>';
+    '</div><div class="m-cta"><div class="t">Want this delivered every week?</div><button class="btn btn-beta" onclick="closeMktModal();startSignup()">✨ Join the beta</button></div>';
   m.classList.add('open');document.body.style.overflow='hidden';
 }
 function closeMktModal(){document.getElementById('mkt-modal').classList.remove('open');document.body.style.overflow='';}
@@ -2507,8 +2554,11 @@ var DS_GEO={
   "Other":{code:"+",states:[]}
 };
 function geoOptions(selected){return Object.keys(DS_GEO).map(function(k){return '<option value="'+he(k)+'" '+(selected===k?'selected':'')+'>'+he(k)+'</option>';}).join('');}
+var DS_CITIES={"India":{"Andhra Pradesh":["Visakhapatnam","Vijayawada","Guntur","Tirupati","Nellore","Kurnool","Rajahmundry"],"Arunachal Pradesh":["Itanagar","Tawang","Naharlagun","Pasighat"],"Assam":["Guwahati","Dibrugarh","Silchar","Jorhat","Tezpur"],"Bihar":["Patna","Gaya","Muzaffarpur","Bhagalpur","Darbhanga"],"Chhattisgarh":["Raipur","Bhilai","Bilaspur","Durg","Korba","Jagdalpur"],"Goa":["Panaji","Margao","Vasco da Gama","Mapusa"],"Gujarat":["Ahmedabad","Surat","Vadodara","Rajkot","Gandhinagar","Bhavnagar","Jamnagar","Anand","Bharuch"],"Haryana":["Gurugram","Faridabad","Panipat","Karnal","Hisar","Ambala"],"Jharkhand":["Ranchi","Jamshedpur","Dhanbad","Bokaro"],"Karnataka":["Bengaluru","Mysuru","Mangaluru","Hubballi","Belagavi","Shivamogga"],"Kerala":["Kochi","Thiruvananthapuram","Kozhikode","Thrissur","Alappuzha","Kollam"],"Madhya Pradesh":["Bhopal","Indore","Gwalior","Jabalpur","Ujjain"],"Maharashtra":["Mumbai","Pune","Nagpur","Nashik","Aurangabad","Thane","Navi Mumbai","Kolhapur"],"Manipur":["Imphal"],"Meghalaya":["Shillong"],"Mizoram":["Aizawl"],"Nagaland":["Kohima","Dimapur"],"Odisha":["Bhubaneswar","Cuttack","Puri","Rourkela"],"Punjab":["Amritsar","Ludhiana","Jalandhar","Patiala","Mohali"],"Rajasthan":["Jaipur","Udaipur","Jodhpur","Kota","Ajmer","Pushkar","Bikaner","Mount Abu"],"Sikkim":["Gangtok","Namchi"],"Tamil Nadu":["Chennai","Coimbatore","Madurai","Ooty","Salem","Tiruchirappalli","Tirunelveli"],"Telangana":["Hyderabad","Warangal","Nizamabad"],"Tripura":["Agartala"],"Uttar Pradesh":["Lucknow","Noida","Agra","Varanasi","Prayagraj","Kanpur","Meerut","Ghaziabad","Gorakhpur"],"Uttarakhand":["Dehradun","Rishikesh","Haridwar","Nainital","Mussoorie","Haldwani"],"West Bengal":["Kolkata","Siliguri","Durgapur","Howrah","Darjeeling"],"Delhi":["New Delhi","Delhi"],"Jammu and Kashmir":["Srinagar","Jammu","Gulmarg","Pahalgam"],"Ladakh":["Leh"],"Chandigarh":["Chandigarh"],"Puducherry":["Puducherry"],"Andaman and Nicobar Islands":["Port Blair"],"Lakshadweep":["Kavaratti"],"Dadra and Nagar Haveli and Daman and Diu":["Daman","Silvassa"]},"United States":["New York","Los Angeles","Chicago","San Francisco","Seattle","Boston","Austin","Washington, D.C.","Miami","Atlanta","Dallas","Houston","Denver","San Diego"],"Canada":["Toronto","Vancouver","Montreal","Calgary","Ottawa","Edmonton","Quebec City","Winnipeg"],"United Kingdom":["London","Manchester","Birmingham","Edinburgh","Glasgow","Liverpool","Bristol","Leeds"],"Australia":["Sydney","Melbourne","Brisbane","Perth","Adelaide","Canberra","Gold Coast"],"United Arab Emirates":["Dubai","Abu Dhabi","Sharjah","Ajman"],"Singapore":["Singapore"],"New Zealand":["Auckland","Wellington","Christchurch","Queenstown"],"Germany":["Berlin","Munich","Hamburg","Frankfurt","Cologne","Stuttgart"],"France":["Paris","Lyon","Marseille","Nice","Bordeaux","Toulouse"],"Japan":["Tokyo","Osaka","Kyoto","Yokohama","Sapporo","Fukuoka"],"South Korea":["Seoul","Busan","Incheon","Daegu"]};
 function renderStates(country,selected){var g=DS_GEO[country]||DS_GEO.Other;var el=document.getElementById('f-state');if(!el)return;var list=g.states||[];if(!list.length){el.outerHTML='<input type="text" id="f-state" value="'+he(selected||'')+'" placeholder="State / Province / Region"/>';return;}el.innerHTML='<option value="">Select state / province</option>'+list.map(function(x){return '<option value="'+he(x)+'" '+(selected===x?'selected':'')+'>'+he(x)+'</option>';}).join('');}
-function updateGeoFields(){var c=document.getElementById('f-country');var country=c?c.value:'India';var g=DS_GEO[country]||DS_GEO.Other;var code=document.getElementById('f-phone-code');if(code)code.value=g.code;renderStates(country,ONB.draft.state||'');}
+function updateGeoFields(){var c=document.getElementById('f-country');var country=c?c.value:'India';var g=DS_GEO[country]||DS_GEO.Other;var code=document.getElementById('f-phone-code');if(code)code.value=g.code;renderStates(country,ONB.draft.state||'');renderCities(country,ONB.draft.state||'',ONB.draft.city||'');}
+function renderCities(country,state,selected){var el=document.getElementById('f-city');if(!el)return;var src=DS_CITIES[country];var list=[];if(Array.isArray(src))list=src;else if(src&&state)list=src[state]||[];else if(src)list=Object.values(src).reduce(function(a,b){return a.concat(b);},[]);list=[...new Set(list)].sort();if(!list.length){el.outerHTML='<input type="text" id="f-city" value="'+he(selected||'')+'" placeholder="Enter city" autocomplete="address-level2"/><div class="field-help">Select a city when a list is available.</div>';return;}el.innerHTML='<option value="">Select city</option>'+list.map(function(x){return '<option value="'+he(x)+'" '+(selected===x?'selected':'')+'>'+he(x)+'</option>';}).join('');}
+function updateCityFields(){var c=document.getElementById('f-country');var s=document.getElementById('f-state');var country=c?c.value:'India';var state=s?s.value:'';ONB.draft.state=state;renderCities(country,state,ONB.draft.city||'');var el=document.getElementById('f-city');if(el)el.onchange=function(){ONB.draft.city=this.value;};}
 function phoneDigits(v){return String(v||'').replace(/\D/g,'');}
 function validatePhone(country,phone){var d=phoneDigits(phone);var rules={"India":10,"United States":10,"Canada":10,"United Kingdom":10,"Australia":9,"United Arab Emirates":9,"Singapore":8,"New Zealand":9,"Germany":10,"France":9,"Japan":10,"South Korea":10};var n=rules[country];return n?d.length===n:(d.length>=7&&d.length<=15);}
 
@@ -2521,11 +2571,12 @@ function r2(){
     '<div class="field-row"><div class="field"><label>Country code</label><input type="text" id="f-phone-code" value="'+he((DS_GEO[country]||DS_GEO.Other).code)+'" readonly/></div>'+
     '<div class="field"><label>Phone / WhatsApp number</label><input type="tel" id="f-wa" value="'+he(d.phone||'')+'" placeholder="9876543210" inputmode="numeric" autocomplete="tel"/></div></div>'+
     '<div class="field-help" style="margin-top:-8px;margin-bottom:14px">Select your country first. DuoSpark will validate the expected number length and add the country code.</div>'+
-    '<div class="field"><label>State / Province</label><select id="f-state" onchange="ONB.draft.state=this.value"><option value="">Select state / province</option></select></div>'+
-    '<div class="field"><label>Your city</label><input type="text" id="f-city" value="'+he(d.city||'')+'" placeholder="e.g. Gurgaon" autocomplete="address-level2"/><div class="field-help">City stays free text so we can support cities worldwide.</div></div>'+
+    '<div class="field"><label>State / Province</label><select id="f-state" onchange="updateCityFields()"><option value="">Select state / province</option></select></div>'+
+    '<div class="field"><label>Your city</label><select id="f-city"><option value="">Select city</option></select><div class="field-help">Choose your city so DuoSpark can personalize dates to your location.</div></div>'+
     '<div class="field"><label>Password</label><input type="password" id="f-password" placeholder="At least 6 characters" autocomplete="new-password"/><div class="field-help">Use this password to sign back in later.</div></div>'+
     '<button class="btn btn-coral btn-block" onclick="sv2()">Continue <i class="ti ti-arrow-right"></i></button>');
   renderStates(country,d.state||'');
+  renderCities(country,d.state||'',d.city||'');
 }
 function sv2(){
   var e=document.getElementById('f-email').value.trim().toLowerCase(),country=document.getElementById('f-country').value,code=(DS_GEO[country]||DS_GEO.Other).code,w=document.getElementById('f-wa').value.trim(),state=document.getElementById('f-state').value.trim(),c=document.getElementById('f-city').value.trim(),pw=document.getElementById('f-password').value;
@@ -2555,6 +2606,7 @@ function r4(){
     '<div class="field"><label>Partner\'s name</label><input type="text" id="f-pname" value="'+he(d.partnerName||'')+'" placeholder="e.g. Arjun" autofocus/></div>'+
     (!same?'<div class="field"><label>Partner\'s city</label><input type="text" id="f-pcity" value="'+he(d.partnerCity||'')+'" placeholder="e.g. Toronto"/><div class="field-help">For long-distance scheduling — we handle time zones.</div></div>':'')+
     '<button class="btn btn-coral btn-block" onclick="sv4()">Continue <i class="ti ti-arrow-right"></i></button>');
+  var pcEl=document.getElementById('f-pcity');if(pcEl){var src=DS_CITIES[d.partnerCountry||d.country||'India'];var list=Array.isArray(src)?src:(src?(Object.values(src).reduce(function(a,b){return a.concat(b);},[])):[]);list=[...new Set(list)].sort();pcEl.innerHTML='<option value="">Select city</option>'+list.map(function(x){return '<option value="'+he(x)+'" '+(d.partnerCity===x?'selected':'')+'>'+he(x)+'</option>';}).join('');}
 }
 function sv4(){var pn=document.getElementById('f-pname').value.trim();if(!pn)return showToast("Please enter your partner's name");ONB.draft.partnerName=pn;var pc=document.getElementById('f-pcity');ONB.draft.partnerCity=pc?pc.value.trim()||showToast("Please enter your partner's city")&&null:ONB.draft.city;if(!ONB.draft.partnerCity)return;onbNext();}
 
@@ -2718,7 +2770,7 @@ function renderApp(){
   startSharedPolling();
 }
 
-async function signOut(){if(!confirm('Sign out?'))return;stopSharedPolling();SESSION.currentUserId=null;await saveSess();showView('marketing');buildMarketing();}
+async function signOut(){if(!confirm('Sign out?'))return;stopVideo(false);stopSharedPolling();SESSION.currentUserId=null;await saveSess();showView('marketing');buildMarketing();}
 function toggleMenu(){document.getElementById('sidebar').classList.toggle('open');}
 function closeMenu(){document.getElementById('sidebar').classList.remove('open');}
 
@@ -2757,6 +2809,9 @@ function generateDeck(u) {
     freeTimes.forEach(function(ft){if((ft==='late-nights'||ft==='weeknights')&&d.energy==='low')d.score+=4;if(ft==='weekend-mornings'&&d.energy==='medium')d.score+=4;if((ft==='weekends'||ft==='flexible')&&d.energy==='high')d.score+=2;});
     if(isWeekend&&(d.dayFit==='weekend'||d.dayFit==='either'))d.score+=5;if(!isWeekend&&(d.dayFit==='weeknight'||d.dayFit==='either'))d.score+=5;
     if(d.festival&&d.festival.some(function(f){return fest.indexOf(f)>=0;}))d.score+=20;
+    if(d.city&&d.city.indexOf('any')<0){cities.forEach(function(city){if(d.city.some(function(dc){return city===dc||city.indexOf(dc)>=0||dc.indexOf(city)>=0;}) )d.score+=16;});}
+    if(d.setting&&sp.setting&&d.setting===sp.setting)d.score+=5;
+    if(d.excelSource)d.score+=1;
     if(couple&&(couple.completedDates||[]).some(function(x){return x.dateKey===d.key;}))d.score-=50;
     var dur=sp.duration||'less-6m',pDur=partner&&(partner.sparkProfile||{}).duration;
     if(d.bestFor==='new'&&(['less-6m','6m-2y'].indexOf(dur)>=0||['less-6m','6m-2y'].indexOf(pDur)>=0))d.score+=5;
@@ -2943,12 +2998,55 @@ async function startRoom(key){
     showToast('Date Room started together ❤️');
   }catch(e){console.error('start room failed',e);showToast('Could not start the date together. Please try again.');}
 }
+
+// ============================================================
+// DUOSPARK VIDEO ROOM — free browser WebRTC via Supabase Broadcast
+// ============================================================
+var VIDEO={pc:null,channel:null,localStream:null,started:false,remoteReady:false};
+function videoChannelName(){var u=curUser();return u&&u.coupleId?'duospark-video-'+u.coupleId:null;}
+async function setupVideoChannel(){
+  var name=videoChannelName();if(!name)return null;
+  if(VIDEO.channel)return VIDEO.channel;
+  VIDEO.channel=DS_SUPABASE.channel(name,{config:{broadcast:{ack:true}}});
+  VIDEO.channel.on('broadcast',{event:'signal'},async function(payload){
+    var m=payload.payload||{}; if(!m||m.from===curUser().id)return;
+    try{
+      if(m.type==='offer'){await ensurePeer(false);await VIDEO.pc.setRemoteDescription(new RTCSessionDescription(m.data));var ans=await VIDEO.pc.createAnswer();await VIDEO.pc.setLocalDescription(ans);await VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'answer',data:ans,from:curUser().id}});}
+      else if(m.type==='answer'){if(VIDEO.pc){await VIDEO.pc.setRemoteDescription(new RTCSessionDescription(m.data));}}
+      else if(m.type==='ice'){if(VIDEO.pc&&m.data)await VIDEO.pc.addIceCandidate(new RTCIceCandidate(m.data));}
+      else if(m.type==='hangup'){stopVideo(false);}
+    }catch(e){console.warn('video signal error',e);}
+  });
+  await VIDEO.channel.subscribe(); return VIDEO.channel;
+}
+async function ensurePeer(initiator){
+  if(VIDEO.pc)return VIDEO.pc;
+  await setupVideoChannel();
+  VIDEO.pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+  VIDEO.pc.onicecandidate=function(e){if(e.candidate&&VIDEO.channel)VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'ice',data:e.candidate,from:curUser().id}});};
+  VIDEO.pc.ontrack=function(e){var v=document.getElementById('remote-video');if(v){v.srcObject=e.streams[0];v.play().catch(function(){});}var s=document.getElementById('video-status');if(s)s.textContent='Connected';};
+  if(VIDEO.localStream)VIDEO.localStream.getTracks().forEach(function(t){VIDEO.pc.addTrack(t,VIDEO.localStream);});
+  if(initiator){var offer=await VIDEO.pc.createOffer();await VIDEO.pc.setLocalDescription(offer);await VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'offer',data:offer,from:curUser().id}});}
+  return VIDEO.pc;
+}
+async function startVideo(){
+  var u=curUser();if(!u||!u.coupleId)return showToast('Connect with your partner first');
+  try{
+    VIDEO.localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    var lv=document.getElementById('local-video');if(lv){lv.srcObject=VIDEO.localStream;lv.muted=true;await lv.play().catch(function(){});}
+    VIDEO.started=true;var s=document.getElementById('video-status');if(s)s.textContent='Waiting for partner…';
+    await ensurePeer(true);renderVideoPanel();
+  }catch(e){console.error(e);showToast('Camera/microphone permission is needed for DuoSpark video.');}
+}
+function renderVideoPanel(){var box=document.getElementById('video-panel');if(!box)return;box.innerHTML='<div class="video-room"><video id="remote-video" autoplay playsinline></video><video id="local-video" class="video-local" autoplay muted playsinline></video><div class="video-empty" id="video-empty"><i class="ti ti-video"></i><strong>DuoSpark video</strong><p>Stay in your Date Room while you talk.</p><button class="btn btn-coral" onclick="startVideo()">Start video</button></div></div><div class="video-status" id="video-status">Not connected</div><button class="btn btn-paper" style="margin-top:8px" onclick="stopVideo(true)">End video</button>';if(VIDEO.localStream){document.getElementById('video-empty').style.display='none';var lv=document.getElementById('local-video');lv.srcObject=VIDEO.localStream;lv.play().catch(function(){});}}
+function stopVideo(send){if(send&&VIDEO.channel)VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'hangup',from:curUser().id}});if(VIDEO.pc){VIDEO.pc.close();VIDEO.pc=null;}if(VIDEO.localStream){VIDEO.localStream.getTracks().forEach(function(t){t.stop();});VIDEO.localStream=null;}VIDEO.started=false;renderVideoPanel();}
 function renderRoomActive(){
   var d=DATES[ROOM.dateKey];var u=curUser();var p=partnerOf(u);if(!d)return;
   var idx=Math.min(ROOM.stepIdx||0,d.steps.length-1);
   var dots=d.steps.map(function(_,i){return'<div class="rdot '+(i<idx?'dn':i===idx?'cr':'')+'"></div>';}).join('');
   var step=d.steps[idx];var waLink='https://wa.me/'+(p?p.whatsapp.replace(/[^0-9]/g,''):'');
-  document.getElementById('asc-room').innerHTML='<div class="room-shell"><div class="room-name"><h2>'+he(d.title)+'</h2><p>Live · '+(p?'With '+he(p.name):'Solo preview')+'</p></div><div class="room-timer"><div class="t" id="rt-time">00:00</div><div class="sl">Step '+(idx+1)+' of '+d.steps.length+'</div></div><div class="rgrid"><div class="rm"><div class="rdots">'+dots+'</div><div class="rstep"><div class="lb">Current step</div><h3>'+he(step.text.split('.')[0])+'</h3>'+(step.time!=='—'?'<div class="st">'+he(step.time)+'</div>':'')+'<p>'+he(step.text)+'</p><div class="rstep-acts">'+(idx<d.steps.length-1?'<button class="btn btn-coral" onclick="nextStep()">Done — next step <i class="ti ti-arrow-right"></i></button>':'<button class="btn btn-coral" onclick="finishDate(\''+ROOM.dateKey+'\')">Finish date <i class="ti ti-confetti"></i></button>')+(idx>0?'<button class="btn btn-paper" onclick="prevStep()"><i class="ti ti-arrow-left"></i> Back</button>':'')+'</div></div></div><div class="rside"><div class="rpanel"><h5>Video call</h5><div class="rvid"><i class="ti ti-video"></i><span>Open WhatsApp video</span><a href="'+waLink+'" target="_blank">Open WhatsApp</a></div></div><div class="rpanel"><h5>Now playing</h5><div class="rmusic"><div class="rmusic-ico"><i class="ti ti-music"></i></div><div class="rmusic-inf"><strong>Coriander & Coconut</strong><span>Synced playlist</span></div></div></div><div class="rpanel"><h5>Send a moment</h5><div class="rreacts"><button class="rrr" onclick="sendReact(\'❤️\')">❤️</button><button class="rrr" onclick="sendReact(\'😂\')">😂</button><button class="rrr" onclick="sendReact(\'✨\')">✨</button></div><div class="rfeed" id="rfeed">'+ROOM.reactions.map(function(r){return'<div>'+r+'</div>';}).join('')+'</div></div></div></div></div>';
+  document.getElementById('asc-room').innerHTML='<div class="room-shell"><div class="room-name"><h2>'+he(d.title)+'</h2><p>Live · '+(p?'With '+he(p.name):'Solo preview')+'</p></div><div class="room-timer"><div class="t" id="rt-time">00:00</div><div class="sl">Step '+(idx+1)+' of '+d.steps.length+'</div></div><div class="rgrid"><div class="rm"><div class="rdots">'+dots+'</div><div class="rstep"><div class="lb">Current step</div><h3>'+he(step.text.split('.')[0])+'</h3>'+(step.time!=='—'?'<div class="st">'+he(step.time)+'</div>':'')+'<p>'+he(step.text)+'</p><div class="rstep-acts">'+(idx<d.steps.length-1?'<button class="btn btn-coral" onclick="nextStep()">Done — next step <i class="ti ti-arrow-right"></i></button>':'<button class="btn btn-coral" onclick="finishDate(\''+ROOM.dateKey+'\')">Finish date <i class="ti ti-confetti"></i></button>')+(idx>0?'<button class="btn btn-paper" onclick="prevStep()"><i class="ti ti-arrow-left"></i> Back</button>':'')+'</div></div></div><div class="rside"><div class="rpanel"><h5>Video call</h5><div id="video-panel"></div><div style="margin-top:8px;font-size:11px;color:var(--inkm)">You can still use WhatsApp separately, but DuoSpark video keeps the call inside the Date Room.</div></div><div class="rpanel"><h5>Now playing</h5><div class="rmusic"><div class="rmusic-ico"><i class="ti ti-music"></i></div><div class="rmusic-inf"><strong>Coriander & Coconut</strong><span>Synced playlist</span></div></div></div><div class="rpanel"><h5>Send a moment</h5><div class="rreacts"><button class="rrr" onclick="sendReact(\'❤️\')">❤️</button><button class="rrr" onclick="sendReact(\'😂\')">😂</button><button class="rrr" onclick="sendReact(\'✨\')">✨</button></div><div class="rfeed" id="rfeed">'+ROOM.reactions.map(function(r){return'<div>'+r+'</div>';}).join('')+'</div></div></div></div></div>';
+  renderVideoPanel();
   updateTimer();
 }
 
@@ -3044,7 +3142,7 @@ function cpInv(){var u=curUser();var link=DUOSPARK_APP_URL+'?invite='+u.inviteCo
 // ============================================================
 // INIT
 // ============================================================
-init();
+loadDateLibraryFromExcel().finally(function(){init();});
 </script>
 </body>
 </html>
