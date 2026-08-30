@@ -3002,44 +3002,70 @@ async function startRoom(key){
 // ============================================================
 // DUOSPARK VIDEO ROOM — free browser WebRTC via Supabase Broadcast
 // ============================================================
-var VIDEO={pc:null,channel:null,localStream:null,started:false,remoteReady:false};
+var VIDEO={pc:null,channel:null,localStream:null,started:false,remoteReady:false,iceQueue:[],role:null};
 function videoChannelName(){var u=curUser();return u&&u.coupleId?'duospark-video-'+u.coupleId:null;}
 async function setupVideoChannel(){
   var name=videoChannelName();if(!name)return null;
   if(VIDEO.channel)return VIDEO.channel;
   VIDEO.channel=DS_SUPABASE.channel(name,{config:{broadcast:{ack:true}}});
-  VIDEO.channel.on('broadcast',{event:'signal'},async function(payload){
-    var m=payload.payload||{}; if(!m||m.from===curUser().id)return;
+  VIDEO.channel.on('broadcast',{event:'signal'},async function(evt){
+    var m=evt.payload||{}; if(!m||m.from===curUser().id)return;
     try{
-      if(m.type==='offer'){await ensurePeer(false);await VIDEO.pc.setRemoteDescription(new RTCSessionDescription(m.data));var ans=await VIDEO.pc.createAnswer();await VIDEO.pc.setLocalDescription(ans);await VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'answer',data:ans,from:curUser().id}});}
-      else if(m.type==='answer'){if(VIDEO.pc){await VIDEO.pc.setRemoteDescription(new RTCSessionDescription(m.data));}}
-      else if(m.type==='ice'){if(VIDEO.pc&&m.data)await VIDEO.pc.addIceCandidate(new RTCIceCandidate(m.data));}
-      else if(m.type==='hangup'){stopVideo(false);}
+      if(m.type==='ready'){
+        VIDEO.remoteReady=true;
+        if(VIDEO.started && VIDEO.role==='caller') await sendVideoOffer();
+      } else if(m.type==='offer'){
+        VIDEO.role='callee';
+        await ensurePeer(false);
+        await VIDEO.pc.setRemoteDescription(new RTCSessionDescription(m.data));
+        while(VIDEO.iceQueue.length) await VIDEO.pc.addIceCandidate(VIDEO.iceQueue.shift());
+        var ans=await VIDEO.pc.createAnswer();
+        await VIDEO.pc.setLocalDescription(ans);
+        await VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'answer',data:ans,from:curUser().id}});
+      } else if(m.type==='answer'){
+        if(VIDEO.pc){await VIDEO.pc.setRemoteDescription(new RTCSessionDescription(m.data));while(VIDEO.iceQueue.length) await VIDEO.pc.addIceCandidate(VIDEO.iceQueue.shift());}
+      } else if(m.type==='ice'){
+        if(VIDEO.pc && VIDEO.pc.remoteDescription) await VIDEO.pc.addIceCandidate(new RTCIceCandidate(m.data));
+        else VIDEO.iceQueue.push(new RTCIceCandidate(m.data));
+      } else if(m.type==='hangup'){stopVideo(false);}
     }catch(e){console.warn('video signal error',e);}
   });
-  await VIDEO.channel.subscribe(); return VIDEO.channel;
+  await VIDEO.channel.subscribe();
+  return VIDEO.channel;
+}
+async function sendVideoOffer(){
+  if(!VIDEO.pc)return;
+  var offer=await VIDEO.pc.createOffer();
+  await VIDEO.pc.setLocalDescription(offer);
+  await VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'offer',data:offer,from:curUser().id}});
 }
 async function ensurePeer(initiator){
   if(VIDEO.pc)return VIDEO.pc;
   await setupVideoChannel();
   VIDEO.pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
-  VIDEO.pc.onicecandidate=function(e){if(e.candidate&&VIDEO.channel)VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'ice',data:e.candidate,from:curUser().id}});};
+  VIDEO.pc.onicecandidate=function(e){if(e.candidate&&VIDEO.channel)VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'ice',data:e.candidate.toJSON?e.candidate.toJSON():e.candidate,from:curUser().id}});};
   VIDEO.pc.ontrack=function(e){var v=document.getElementById('remote-video');if(v){v.srcObject=e.streams[0];v.play().catch(function(){});}var s=document.getElementById('video-status');if(s)s.textContent='Connected';};
+  VIDEO.pc.onconnectionstatechange=function(){var s=document.getElementById('video-status');if(s){var st=VIDEO.pc.connectionState;s.textContent=st==='connected'?'Connected':st==='connecting'?'Connecting…':st==='failed'?'Connection failed — try again':'Waiting for partner…';}};
   if(VIDEO.localStream)VIDEO.localStream.getTracks().forEach(function(t){VIDEO.pc.addTrack(t,VIDEO.localStream);});
-  if(initiator){var offer=await VIDEO.pc.createOffer();await VIDEO.pc.setLocalDescription(offer);await VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'offer',data:offer,from:curUser().id}});}
+  if(initiator){VIDEO.role='caller';if(VIDEO.remoteReady)await sendVideoOffer();}
   return VIDEO.pc;
 }
 async function startVideo(){
   var u=curUser();if(!u||!u.coupleId)return showToast('Connect with your partner first');
   try{
+    await setupVideoChannel();
     VIDEO.localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    VIDEO.started=true;VIDEO.role='caller';
+    renderVideoPanel();
     var lv=document.getElementById('local-video');if(lv){lv.srcObject=VIDEO.localStream;lv.muted=true;await lv.play().catch(function(){});}
-    VIDEO.started=true;var s=document.getElementById('video-status');if(s)s.textContent='Waiting for partner…';
-    await ensurePeer(true);renderVideoPanel();
+    var s=document.getElementById('video-status');if(s)s.textContent='Waiting for partner…';
+    await ensurePeer(true);
+    await VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'ready',from:curUser().id}});
+    if(VIDEO.remoteReady)await sendVideoOffer();
   }catch(e){console.error(e);showToast('Camera/microphone permission is needed for DuoSpark video.');}
 }
 function renderVideoPanel(){var box=document.getElementById('video-panel');if(!box)return;box.innerHTML='<div class="video-room"><video id="remote-video" autoplay playsinline></video><video id="local-video" class="video-local" autoplay muted playsinline></video><div class="video-empty" id="video-empty"><i class="ti ti-video"></i><strong>DuoSpark video</strong><p>Stay in your Date Room while you talk.</p><button class="btn btn-coral" onclick="startVideo()">Start video</button></div></div><div class="video-status" id="video-status">Not connected</div><button class="btn btn-paper" style="margin-top:8px" onclick="stopVideo(true)">End video</button>';if(VIDEO.localStream){document.getElementById('video-empty').style.display='none';var lv=document.getElementById('local-video');lv.srcObject=VIDEO.localStream;lv.play().catch(function(){});}}
-function stopVideo(send){if(send&&VIDEO.channel)VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'hangup',from:curUser().id}});if(VIDEO.pc){VIDEO.pc.close();VIDEO.pc=null;}if(VIDEO.localStream){VIDEO.localStream.getTracks().forEach(function(t){t.stop();});VIDEO.localStream=null;}VIDEO.started=false;renderVideoPanel();}
+function stopVideo(send){if(send&&VIDEO.channel)VIDEO.channel.send({type:'broadcast',event:'signal',payload:{type:'hangup',from:curUser().id}});if(VIDEO.pc){VIDEO.pc.close();VIDEO.pc=null;}if(VIDEO.localStream){VIDEO.localStream.getTracks().forEach(function(t){t.stop();});VIDEO.localStream=null;}VIDEO.started=false;VIDEO.remoteReady=false;VIDEO.iceQueue=[];VIDEO.role=null;renderVideoPanel();}
 function renderRoomActive(){
   var d=DATES[ROOM.dateKey];var u=curUser();var p=partnerOf(u);if(!d)return;
   var idx=Math.min(ROOM.stepIdx||0,d.steps.length-1);
