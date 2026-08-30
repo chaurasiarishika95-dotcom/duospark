@@ -107,7 +107,7 @@ ms{padding:100px 0;display:block}
 @media(max-width:768px){.wscircle{width:44px;height:44px;margin:0;font-size:17px}.wsmeta{display:none}}
 .sd-bg{background:var(--ink);color:var(--paper)}.sd-bg .st{color:var(--paper)}.sd-bg .sl{color:rgba(248,241,228,.7)}.sd-bg .se{color:var(--gold)}.sd-bg .se::before{background:var(--gold)}
 .dg{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:22px;margin-top:56px}
-.dc{background:var(--paper);color:var(--ink);padding:26px;border-radius:4px;cursor:pointer;transition:transform .3s}.dc:hover{transform:translateY(-3px)}
+.dc{background:var(--paper);color:var(--ink);padding:26px;border-radius:4px;cursor:pointer;transition:transform .3s}.dc:hover{transform:translateY(-3px)}.dc-actions{display:flex;gap:8px;margin-top:14px}.dc-save{flex:1;padding:9px 12px;border:.5px solid var(--coral);border-radius:100px;background:var(--corals);color:var(--corald);font:500 12px 'Geist',sans-serif;cursor:pointer}.dc-save:hover{background:var(--coral);color:var(--paper)}.dc-save.saved{background:var(--coral);color:var(--paper);cursor:default}.dk-lock{margin-top:7px;padding:8px 10px;border-radius:5px;background:var(--cream);color:var(--inkm);font-size:11px;font-family:'DM Mono',monospace}
 .da{aspect-ratio:1.3;background:var(--cream);border-radius:2px;margin-bottom:18px;display:flex;align-items:center;justify-content:center;font-size:44px;color:var(--coral)}
 .da.sage{background:rgba(107,142,90,.12);color:var(--sage)}.da.rose{background:rgba(196,85,95,.1);color:var(--rose)}.da.gold{background:rgba(200,144,46,.12);color:var(--gold)}
 .dm{display:inline-block;padding:2px 9px;background:var(--corals);color:var(--corald);border-radius:100px;font-size:10px;font-family:'DM Mono',monospace;margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em}
@@ -2187,6 +2187,7 @@ var DATES = {
 
 };
 
+var DATE_LIBRARY_SOURCE='DuoSpark_Date_Library.xlsx · 128 records · embedded at build time';
 var DAILY_SPARKS = ["What's one small thing your partner did this week that made you smile?","What's a song that reminds you of them right now?","If you could plan a surprise for next weekend, what would it be?","What's something you love about them that you've never told them?","When did you last feel really proud of them?","What's a quiet moment you remember from this week?","What does 'home' feel like with them?","What's one thing you're looking forward to doing together?","If you had a free day tomorrow, what would you do as a couple?","What's a small fear you'd want them to know about?"];
 var FLAVORS = {'ck':['The Cozy Adventurers','You build with your hands and feed your hearts.'],'cd':['The Slow Burners','Long meals, longer conversations.'],'md':['The Tender Makers','You build something together — a meal, a memory, a moment.'],'mc':['The Sunday Stayers',"You don't need plans. You need each other and snacks."],'tf':['The Wanderers','New places, new flavors. You collect experiences together.'],'wd':['The Long Walkers','You think out loud, side by side.'],'gp':['The Playful Pair',"You bring out each other's mischief."],'df':['The Quiet Romantics','Love in small gestures.']};
 
@@ -2268,6 +2269,9 @@ function coupleOf(u){return u&&u.coupleId?APP_DATA.couples[u.coupleId]:null;}
 function todayKey(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function currentSparkKey(){return todayKey();}
 function activeDateOf(c){return c&&c.activeDate&&c.activeDate.status==='active'?c.activeDate:null;}
+function coupleStarterId(c){return c&&c.member1?c.member1:null;}
+function isCoupleStarter(u,c){return !!(u&&c&&coupleStarterId(c)===u.id);}
+function savedDateOf(c,key){return c&&(c.savedDates||[]).find(function(x){return x.dateKey===key;});}
 function prettyMode(m){return{'newly-dating':'Newly dating','long-distance':'Long-distance','engaged':'Engaged but apart','living-together':'Living together'}[m]||m;}
 function prettyDur(d){return{'less-6m':'< 6 months','6m-2y':'6m–2y','2y-5y':'2–5 years','5y+':'5+ years'}[d]||'—';}
 function todayStr(){return new Date().toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric'});}
@@ -2638,7 +2642,7 @@ async function finalizePartner(){
     var sp={duration:ONB.draft.duration,interests:ONB.draft.interests,loveLang:ONB.draft.loveLang,partnerLang:ONB.draft.partnerLang,diet:ONB.draft.diet,allergies:ONB.draft.allergies||'',budget:ONB.draft.budget,languages:ONB.draft.languages,freeTime:ONB.draft.freeTime,missing:ONB.draft.missing};
     var user={id:uid2,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:cr.id,coupleId:null,passwordHash:passwordHash,mode:cr.mode,partnerName:cr.name,partnerCity:cr.city,sparkProfile:sp,inviteCode:null,createdAt:new Date().toISOString()};
     var cid=crypto.randomUUID();
-    var couple={id:cid,member1:cr.id,member2:uid2,mode:cr.mode,matchedDates:[],completedDates:[],letters:[],sparkAnswers:[],status:'connected',createdAt:new Date().toISOString(),pairedAt:new Date().toISOString()};
+    var couple={id:cid,member1:cr.id,member2:uid2,mode:cr.mode,matchedDates:[],savedDates:[],completedDates:[],letters:[],sparkAnswers:[],status:'connected',createdAt:new Date().toISOString(),pairedAt:new Date().toISOString()};
     cr.partnerId=uid2;cr.coupleId=cid;
     var a=await DS_SUPABASE.from('profiles').upsert({id:uid2,name:user.name,email:user.email||'',profile_data:user},{onConflict:'id'});if(a.error)throw a.error;
     var b=await DS_SUPABASE.from('profiles').upsert({id:cr.id,name:cr.name,email:cr.email||'',profile_data:cr},{onConflict:'id'});if(b.error)throw b.error;
@@ -2727,106 +2731,45 @@ function goScreen(s){
 }
 
 function generateDeck(u) {
-  var sp = u.sparkProfile || {};
-  var mode = u.mode;
-  var interests = (sp.interests || []).map(function(i) { return i.toLowerCase(); });
-  var partner = partnerOf(u);
-  var pi = partner && partner.sparkProfile ? (partner.sparkProfile.interests || []).map(function(i) { return i.toLowerCase(); }) : [];
-  var allInterests = interests.concat(pi);
-  var couple = coupleOf(u);
-  var userBudget = sp.budget || 'mid';
-  var userDiet = sp.diet || 'any';
-  var userCity = (u.city || '').toLowerCase();
-  var userMissing = sp.missing || '';
-  var userFreeTime = sp.freeTime || 'flexible';
-  var isWeekend = (new Date().getDay() === 0 || new Date().getDay() === 6);
-
-  // Budget order for filtering (user can afford up to their bracket)
-  var budgetOrder = ['free','low','mid','high','premium'];
-  var userBudgetIdx = budgetOrder.indexOf(userBudget);
-  if (userBudgetIdx < 0) userBudgetIdx = 2; // default mid
-
-  // Festival detection (very basic — checks current month)
-  var month = new Date().getMonth(); // 0-indexed
-  var currentFestivals = [];
-  if (month === 9 || month === 10) currentFestivals.push('diwali');  // Oct-Nov
-  if (month === 2) currentFestivals.push('holi');                    // March
-  if (month === 7 || month === 8) currentFestivals.push('karva-chauth'); // Aug-Sep
-  if (month === 11) currentFestivals.push('christmas');              // Dec
-  if (month === 1) currentFestivals.push('valentine');               // Feb
-
-  var cands = Object.entries(DATES).filter(function(e) {
-    var d = e[1];
-    // HARD FILTER 1: mode must be suitable
-    if (d.suitableFor.indexOf(mode) < 0) return false;
-    // HARD FILTER 2: budget — don't show dates the user can't afford
-    var dateBudgetIdx = budgetOrder.indexOf(d.budgetBracket || 'mid');
-    if (dateBudgetIdx > userBudgetIdx + 1) return false; // allow one bracket up
-    // HARD FILTER 3: diet — don't show non-veg dates to veg/jain users
-    if ((userDiet === 'veg' || userDiet === 'jain') && d.diet === 'non-veg') return false;
-    // HARD FILTER 4: city — don't show city-specific dates to wrong city
-    if (d.city && d.city.indexOf('any') < 0) {
-      var cityMatch = d.city.some(function(c) { return userCity.indexOf(c) >= 0 || c.indexOf(userCity.split(' ')[0]) >= 0; });
-      if (!cityMatch) return false;
-    }
+  var sp=u.sparkProfile||{},mode=u.mode,partner=partnerOf(u),couple=coupleOf(u);
+  var interests=(sp.interests||[]).map(function(i){return i.toLowerCase();});
+  var pi=partner&&partner.sparkProfile?(partner.sparkProfile.interests||[]).map(function(i){return i.toLowerCase();}):[];
+  var allInterests=interests.concat(pi);
+  var budgetOrder=['free','low','mid','high','premium'];
+  var ub=budgetOrder.indexOf(sp.budget||'mid'),pb=partner?budgetOrder.indexOf((partner.sparkProfile||{}).budget||'mid'):ub;
+  if(ub<0)ub=2;if(pb<0)pb=2;var coupleBudget=Math.min(ub,pb);
+  var ud=sp.diet||'any',pd=partner?(partner.sparkProfile||{}).diet||'any':'any';
+  var strictVeg=(ud==='veg'||ud==='jain'||pd==='veg'||pd==='jain');
+  var cities=[(u.city||'').toLowerCase(),(partner&&partner.city||'').toLowerCase()].filter(Boolean);
+  var freeTimes=[sp.freeTime||'flexible',partner?(partner.sparkProfile||{}).freeTime||'flexible':'flexible'];
+  var isWeekend=(new Date().getDay()===0||new Date().getDay()===6),month=new Date().getMonth(),fest=[];
+  if(month===9||month===10)fest.push('diwali');if(month===2)fest.push('holi');if(month===7||month===8)fest.push('karva-chauth');if(month===11)fest.push('christmas');if(month===1)fest.push('valentine');
+  var cands=Object.entries(DATES).filter(function(e){
+    var d=e[1];if(d.suitableFor.indexOf(mode)<0)return false;
+    var db=budgetOrder.indexOf(d.budgetBracket||'mid');if(db<0)db=2;if(db>coupleBudget+1)return false;
+    if(strictVeg&&d.diet==='non-veg')return false;
+    if(d.city&&d.city.indexOf('any')<0){var cityMatch=cities.some(function(city){return d.city.some(function(dc){return city.indexOf(dc)>=0||dc.indexOf(city.split(' ')[0])>=0;});});if(!cityMatch)return false;}
     return true;
-  }).map(function(e) {
-    var d = Object.assign({ key: e[0], score: 0 }, e[1]);
-
-    // SCORE 1: interest match (+8 per tag match)
-    (d.tags || []).forEach(function(t) {
-      if (allInterests.some(function(i) { return i.indexOf(t.toLowerCase()) >= 0 || t.toLowerCase().indexOf(i.split(' ')[0]) >= 0; })) {
-        d.score += 8;
-      }
-    });
-
-    // SCORE 2: missing pain match (+15 if date addresses what they said is missing)
-    if (userMissing && (d.missing || []).indexOf(userMissing) >= 0) d.score += 15;
-
-    // SCORE 3: energy level — match to free time
-    if ((userFreeTime === 'late-nights' || userFreeTime === 'weeknights') && d.energy === 'low') d.score += 6;
-    if ((userFreeTime === 'weekend-mornings') && d.energy === 'medium') d.score += 6;
-    if (d.energy === 'high' && (userFreeTime === 'weekends' || userFreeTime === 'flexible')) d.score += 4;
-
-    // SCORE 4: day fit — boost if it matches today
-    if (isWeekend && (d.dayFit === 'weekend' || d.dayFit === 'either')) d.score += 5;
-    if (!isWeekend && (d.dayFit === 'weeknight' || d.dayFit === 'either')) d.score += 5;
-
-    // SCORE 5: festival boost — if it's a relevant festival week
-    if (d.festival && d.festival.some(function(f) { return currentFestivals.indexOf(f) >= 0; })) d.score += 20;
-
-    // SCORE 6: novelty — penalise dates already completed
-    if (couple && (couple.completedDates || []).some(function(c) { return c.dateKey === d.key; })) d.score -= 20;
-
-    // SCORE 7: boost variety for new vs established
-    var dur = (u.sparkProfile || {}).duration || 'less-6m';
-    if (d.bestFor === 'new' && (dur === 'less-6m' || dur === '6m-2y')) d.score += 5;
-    if (d.bestFor === 'established' && (dur === '2y-5y' || dur === '5y+')) d.score += 5;
-
+  }).map(function(e){
+    var d=Object.assign({key:e[0],score:0},e[1]);
+    (d.tags||[]).forEach(function(t){if(allInterests.some(function(i){return i.indexOf(t.toLowerCase())>=0||t.toLowerCase().indexOf(i.split(' ')[0])>=0;}))d.score+=8;});
+    [sp.missing,partner&&(partner.sparkProfile||{}).missing].forEach(function(m){if(m&&(d.missing||[]).indexOf(m)>=0)d.score+=12;});
+    freeTimes.forEach(function(ft){if((ft==='late-nights'||ft==='weeknights')&&d.energy==='low')d.score+=4;if(ft==='weekend-mornings'&&d.energy==='medium')d.score+=4;if((ft==='weekends'||ft==='flexible')&&d.energy==='high')d.score+=2;});
+    if(isWeekend&&(d.dayFit==='weekend'||d.dayFit==='either'))d.score+=5;if(!isWeekend&&(d.dayFit==='weeknight'||d.dayFit==='either'))d.score+=5;
+    if(d.festival&&d.festival.some(function(f){return fest.indexOf(f)>=0;}))d.score+=20;
+    if(couple&&(couple.completedDates||[]).some(function(x){return x.dateKey===d.key;}))d.score-=50;
+    var dur=sp.duration||'less-6m',pDur=partner&&(partner.sparkProfile||{}).duration;
+    if(d.bestFor==='new'&&(['less-6m','6m-2y'].indexOf(dur)>=0||['less-6m','6m-2y'].indexOf(pDur)>=0))d.score+=5;
+    if(d.bestFor==='established'&&(['2y-5y','5y+'].indexOf(dur)>=0||['2y-5y','5y+'].indexOf(pDur)>=0))d.score+=5;
     return d;
   });
-
-  cands.sort(function(a, b) { return b.score - a.score; });
-
-  // DIVERSIFY: pick top 3 from different settings/categories to avoid 3 cooking dates
-  var picks = [], usedSettings = new Set(), usedTags = new Set();
-  for (var i = 0; i < cands.length && picks.length < 3; i++) {
-    var c = cands[i];
-    var primaryTag = (c.tags || [])[0] || 'misc';
-    var setting = c.setting || 'at-home';
-    // Allow same setting if we're running out of options, but prefer variety
-    if (usedTags.has(primaryTag) && picks.length > 0 && cands.length > 5) continue;
-    picks.push(c);
-    usedTags.add(primaryTag);
-    usedSettings.add(setting);
-  }
-  // Backfill if not enough
-  if (picks.length < 3) {
-    for (var j = 0; j < cands.length && picks.length < 3; j++) {
-      if (picks.indexOf(cands[j]) < 0) picks.push(cands[j]);
-    }
-  }
-  return picks.slice(0, 3);
+  cands.sort(function(a,b){return b.score-a.score;});
+  var picks=[],usedTags=new Set();
+  (couple&&couple.savedDates||[]).forEach(function(x){var d=DATES[x.dateKey];if(d&&!(couple.completedDates||[]).some(function(m){return m.dateKey===x.dateKey;}))picks.push(Object.assign({key:x.dateKey,score:999},d));});
+  picks=picks.slice(0,3);picks.forEach(function(x){usedTags.add((x.tags||[])[0]||'misc');});
+  for(var i=0;i<cands.length&&picks.length<3;i++){var c=cands[i],tag=(c.tags||[])[0]||'misc';if(usedTags.has(tag)&&picks.length>0&&cands.length>5)continue;if(!picks.some(function(x){return x.key===c.key;})){picks.push(c);usedTags.add(tag);}}
+  for(var j=0;j<cands.length&&picks.length<3;j++)if(!picks.some(function(x){return x.key===cands[j].key;}))picks.push(cands[j]);
+  return picks.slice(0,3);
 }
 
 function renderHome(){
@@ -2849,7 +2792,8 @@ function renderDeckCard(d,u,couple){
   var dt=DATES[d.key];
   var matched=couple&&(couple.matchedDates||[]).find(function(m){return m.dateKey===d.key&&m.status==='matched';});
   var completed=couple&&(couple.completedDates||[]).some(function(m){return m.dateKey===d.key;});
-  var active=activeDateOf(couple); 
+  var active=activeDateOf(couple);
+  var saved=savedDateOf(couple,d.key);
   var iSw=couple&&(couple.matchedDates||[]).find(function(m){return m.dateKey===d.key&&m.swipes&&m.swipes[u.id]==='right';});
   var pSw=couple&&u.partnerId&&(couple.matchedDates||[]).find(function(m){return m.dateKey===d.key&&m.swipes&&m.swipes[u.partnerId]==='right';});
   var acts,sb='';
@@ -2860,8 +2804,14 @@ function renderDeckCard(d,u,couple){
     acts='<button class="dk-btn sw" disabled><i class="ti ti-flame"></i> Live now</button><button class="dk-btn ps" onclick="goScreen(\'room\')"><i class="ti ti-player-play"></i> Continue</button>';
     sb='<div class="dk-st mtch"><i class="ti ti-users"></i> Started together · live for both</div>';
   } else if(matched){
-    acts='<button class="dk-btn sw" disabled><i class="ti ti-check"></i> Matched</button><button class="dk-btn ps" onclick="startRoom(\''+d.key+'\')"><i class="ti ti-flame"></i> Start together</button>';
-    sb='<div class="dk-st mtch"><i class="ti ti-confetti"></i> Both swiped right — ready to start together.</div>';
+    if(isCoupleStarter(u,couple)){
+      acts='<button class="dk-btn sw" disabled><i class="ti ti-check"></i> Matched</button><button class="dk-btn ps" onclick="startRoom(\''+d.key+'\')"><i class="ti ti-flame"></i> Start together</button>';
+      sb='<div class="dk-st mtch"><i class="ti ti-confetti"></i> Both swiped right — ready to start together.</div>';
+    }else{
+      var starter=APP_DATA.users[coupleStarterId(couple)];
+      acts='<button class="dk-btn sw" disabled><i class="ti ti-lock"></i> Waiting to start</button><button class="dk-btn ps" onclick="openDate(\''+d.key+'\')">View</button>';
+      sb='<div class="dk-lock"><i class="ti ti-lock"></i> '+he(starter?starter.name:'Your partner')+' must start Date Night first.</div>';
+    }
   } else if(iSw&&!pSw){
     acts='<button class="dk-btn sw" disabled><i class="ti ti-heart"></i> You loved it</button><button class="dk-btn ps" onclick="openDate(\''+d.key+'\')">View</button>';sb='<div class="dk-st">Waiting for '+he(u.partnerName||'partner')+' to swipe</div>';
   } else if(pSw&&!iSw){
@@ -2872,6 +2822,7 @@ function renderDeckCard(d,u,couple){
 
 async function restartDate(key){
   var u=curUser();if(!u||!u.coupleId)return;
+  if(!isCoupleStarter(u,coupleOf(u)))return showToast('Only the starter can restart Date Night.');
   try{
     await persistCoupleLatest(u.coupleId,async function(c){
       c.activeDate={dateKey:key,status:'active',startedAt:new Date().toISOString(),startedBy:u.id,stepIdx:0};
@@ -2929,10 +2880,16 @@ async function sendSpark(idx){
 
 
 function renderDiscover(){
-  var u=curUser();var filters=['all','cooking','crafty','movies','conversation','outdoor','free','festival'];
-  var all=Object.entries(DATES);var filtered=DISC_FILTER==='all'?all:all.filter(function(e){return e[1].tags.some(function(t){return t.toLowerCase().indexOf(DISC_FILTER)>=0;});});
-  document.getElementById('asc-discover').innerHTML='<h1 class="pg-title">Discover dates</h1><div class="pg-sub">'+Object.keys(DATES).length+' fully workflowed dates.</div><div class="flt">'+filters.map(function(f){return'<div class="fc-chip '+(DISC_FILTER===f?'on':'')+'" onclick="setFilt(\''+f+'\')">'+f+'</div>';}).join('')+'</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px">'+filtered.map(function(e){var k=e[0];var d=e[1];return'<div class="dc" onclick="openDate(\''+k+'\')"><div class="da '+d.artClass+'"><i class="ti '+d.icon+'"></i></div><span class="dm">'+prettyMode(d.mode)+'</span><div class="dt">'+he(d.title)+'</div><div class="dd">'+he(d.desc)+'</div><div class="dmet"><span>'+d.time.toUpperCase()+'</span><span>'+d.cost.toUpperCase()+'</span></div></div>';}).join('')+'</div>';
+  var u=curUser(),c=coupleOf(u),filters=['all','cooking','crafty','movies','conversation','outdoor','free','festival'];
+  var all=Object.entries(DATES),filtered=DISC_FILTER==='all'?all:all.filter(function(e){return e[1].tags.some(function(t){return t.toLowerCase().indexOf(DISC_FILTER)>=0;});});
+  document.getElementById('asc-discover').innerHTML='<h1 class="pg-title">Discover dates</h1><div class="pg-sub">'+Object.keys(DATES).length+' workflowed dates · personalized from your couple profile.</div><div class="flt">'+filters.map(function(f){return'<div class="fc-chip '+(DISC_FILTER===f?'on':'')+'" onclick="setFilt(\''+f+'\')">'+f+'</div>';}).join('')+'</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px">'+filtered.map(function(e){var k=e[0],d=e[1],sv=savedDateOf(c,k);return'<div class="dc" onclick="openDate(\''+k+'\')"><div class="da '+d.artClass+'"><i class="ti '+d.icon+'"></i></div><span class="dm">'+prettyMode(d.mode)+'</span><div class="dt">'+he(d.title)+'</div><div class="dd">'+he(d.desc)+'</div><div class="dmet"><span>'+d.time.toUpperCase()+'</span><span>'+d.cost.toUpperCase()+'</span></div><div class="dc-actions"><button class="dc-save '+(sv?'saved':'')+'" '+(sv?'disabled':'')+' onclick="event.stopPropagation();addDiscoverDate(\''+k+'\')"><i class="ti '+(sv?'ti-check':'ti-bookmark')+'"></i> '+(sv?'Added to Date Deck':'Add to Date Deck')+'</button></div></div>';}).join('')+'</div>';
 }
+async function addDiscoverDate(key){
+  var u=curUser();if(!u||!u.coupleId)return showToast('Connect with your partner first');if(!DATES[key])return;
+  try{await persistCoupleLatest(u.coupleId,async function(c){c.savedDates=c.savedDates||[];if(!c.savedDates.some(function(x){return x.dateKey===key;}))c.savedDates.push({dateKey:key,savedBy:u.id,savedAt:new Date().toISOString()});});showToast('Added to your Date Deck ❤️');renderDiscover();renderHome();}
+  catch(e){console.error('save discover date failed',e);showToast('Could not add this date right now.');}
+}
+
 function setFilt(f){DISC_FILTER=f;renderDiscover();}
 
 function openDate(key){
@@ -2947,7 +2904,7 @@ function openDate(key){
     '<div class="dtSec"><h4>Recipe video to watch friday</h4><a href="'+d.video.url+'" target="_blank" class="vl"><i class="ti ti-player-play"></i><div><strong>'+he(d.video.title)+'</strong><span>'+he(d.video.source)+'</span></div></a></div>'+
     '<div class="dtSec"><h4>Pre-flight (15 min before)</h4><ul class="pre-l">'+d.preflight.map(function(p){return'<li><i class="ti ti-check"></i> '+he(p)+'</li>';}).join('')+'</ul></div>'+
     '<div class="dtSec"><h4>Step by step</h4><div class="rst">'+d.steps.map(function(s){return'<div class="rs"><div><div class="rs-t">'+he(s.text)+'</div>'+(s.time!=='—'?'<div class="rs-ti">'+he(s.time)+'</div>':'')+'</div></div>';}).join('')+'</div></div></div>'+
-    '<div class="dt-cta">'+(done?'<div class="t">Already completed. See it on your Memory Wall.</div><button class="btn btn-coral" onclick="goScreen(\'memory\')">Memory Wall</button>':matched?'<div class="t">Scheduled for Saturday 9 PM. Open Date Room when it\'s time.</div><button class="btn btn-coral" onclick="startRoom(\''+key+'\')">Open Date Room <i class="ti ti-flame"></i></button>':'<div class="t">Both swipe right in your Date Deck to schedule it.</div><button class="btn btn-coral" onclick="goScreen(\'home\')">Back to Home</button>')+'</div>';
+    '<div class="dt-cta">'+(done?'<div class="t">Already completed. See it on your Memory Wall.</div><button class="btn btn-coral" onclick="goScreen(\'memory\')">Memory Wall</button>':matched?(isCoupleStarter(u,couple)?'<div class="t">Both swiped right — you start Date Night for both of you.</div><button class="btn btn-coral" onclick="startRoom(\''+key+'\')">Start Date Night <i class="ti ti-flame"></i></button>':'<div class="t">Waiting for the partner who created DuoSpark to start Date Night.</div><button class="btn btn-paper" disabled><i class="ti ti-lock"></i> Locked until start</button>'):'<div class="t">Both swipe right in your Date Deck to schedule it.</div><button class="btn btn-coral" onclick="goScreen(\'home\')">Back to Home</button>')+'</div>';
   document.querySelectorAll('.ascreen').forEach(function(e){e.classList.remove('active');});
   document.getElementById('asc-detail').classList.add('active');
   document.querySelectorAll('.sb-link').forEach(function(e){e.classList.remove('active');});
@@ -2958,7 +2915,7 @@ function renderRoom(){
   if(!active){
     var matched=couple&&(couple.matchedDates||[]).find(function(m){return m.status==='matched';});
     if(!matched){document.getElementById('asc-room').innerHTML='<div class="room-empty"><i class="ti ti-flame"></i><h2>No date active.</h2><p>Match a date first. Once one partner starts it, the same session begins for both of you.</p><button class="btn btn-coral" onclick="goScreen(\'home\')">Back to Home</button></div>';return;}
-    document.getElementById('asc-room').innerHTML='<div class="room-empty"><i class="ti ti-users"></i><h2>Ready when you are.</h2><p>'+he(DATES[matched.dateKey].title)+' is matched. Start it once and DuoSpark will start the same session for both of you.</p><button class="btn btn-coral" onclick="startRoom(\''+matched.dateKey+'\')">Start together <i class="ti ti-flame"></i></button></div>';return;
+    if(isCoupleStarter(u,couple)){document.getElementById('asc-room').innerHTML='<div class="room-empty"><i class="ti ti-users"></i><h2>Ready when you are.</h2><p>'+he(DATES[matched.dateKey].title)+' is matched. Start it once and DuoSpark will start the same session for both of you.</p><button class="btn btn-coral" onclick="startRoom(\''+matched.dateKey+'\')">Start Date Night <i class="ti ti-flame"></i></button></div>';}else{var starter=APP_DATA.users[coupleStarterId(couple)];document.getElementById('asc-room').innerHTML='<div class="room-empty"><i class="ti ti-lock"></i><h2>Date Night is locked.</h2><p>'+he(starter?starter.name:'Your partner')+' needs to click Start Date Night first. Once they do, this room will open for both of you.</p><div class="dk-lock"><i class="ti ti-clock"></i> Waiting for the starter</div></div>';}return;
   }
   if(!ROOM.dateKey||ROOM.dateKey!==active.dateKey||ROOM.startRemoteAt!==active.startedAt){
     if(ROOM.ti)clearInterval(ROOM.ti);
@@ -2969,6 +2926,7 @@ function renderRoom(){
 }
 async function startRoom(key){
   var u=curUser();if(!u||!u.coupleId)return showToast('Your couple is not connected yet');
+  var c=coupleOf(u);if(c&&!isCoupleStarter(u,c))return showToast('Date Night is locked until the starter begins it.');
   try{
     var latest=await persistCoupleLatest(u.coupleId,async function(c){
       var existing=activeDateOf(c);
