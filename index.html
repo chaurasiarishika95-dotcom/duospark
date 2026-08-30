@@ -2203,7 +2203,7 @@ function computeFlavor(interests) {
 // ============================================================
 var SUPABASE_URL='https://tgxgmytaifgpqfvmtsqo.supabase.co';
 var SUPABASE_PUBLISHABLE_KEY='sb_publishable_b9XkYaBcpwjZFzU2aP70kQ_qONavz1X';
-var DUOSPARK_APP_URL='https://duosprak.vercel.app/';
+var DUOSPARK_APP_URL='https://duosprak.vercel.app/'; // Production share URL — never use file://, localhost, or a Vercel preview URL.
 var DS_SUPABASE=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
 var APP_DATA={users:{},couples:{},invites:{}};
 var SESSION={currentUserId:null};
@@ -2224,15 +2224,11 @@ async function loadRemoteData(){
   var c=await DS_SUPABASE.from('couples').select('*'); if(c.error)throw c.error;
   var i=await DS_SUPABASE.from('invites').select('*'); if(i.error)throw i.error;
   resetData();
-  (p.data||[]).forEach(function(row){var u=row.profile_data||{};u.id=row.id;u.name=row.name||u.name;u.email=row.email||u.email||'';u.authUserId=row.auth_user_id||u.authUserId||null;APP_DATA.users[row.id]=u;});
+  (p.data||[]).forEach(function(row){var u=row.profile_data||{};u.id=row.id;u.name=row.name||u.name;u.email=row.email||u.email||'';APP_DATA.users[row.id]=u;});
   (c.data||[]).forEach(function(row){var d=row.couple_data||{};d.id=row.id;d.member1=d.member1||row.partner_one;d.member2=d.member2||row.partner_two;d.status=row.status||d.status||'connected';APP_DATA.couples[row.id]=d;});
   (i.data||[]).forEach(function(row){APP_DATA.invites[row.code]={id:row.id,creatorId:row.inviter_id,coupleId:row.couple_id||null,used:row.status==='used',status:row.status,createdAt:row.created_at};});
 }
-async function saveRemoteUser(u){var row={id:u.id,name:u.name||'',email:u.email||'',profile_data:u};if(u.authUserId)row.auth_user_id=u.authUserId;var r=await DS_SUPABASE.from('profiles').upsert(row,{onConflict:'id'});if(r.error)throw r.error;}
-async function linkAuthUser(profileId,authUserId){if(!profileId||!authUserId)return;var r=await DS_SUPABASE.from('profiles').update({auth_user_id:authUserId}).eq('id',profileId);if(r.error)throw r.error;}
-async function getProfileForAuth(authUser){if(!authUser)return null;var email=(authUser.email||'').toLowerCase();var r=null;if(email)r=await DS_SUPABASE.from('profiles').select('*').eq('email',email).maybeSingle();if(r&&r.error)throw r.error;if(r&&r.data)return r.data;var a=await DS_SUPABASE.from('profiles').select('*').eq('auth_user_id',authUser.id).maybeSingle();if(a.error)throw a.error;return a.data||null;}
-async function finishAuthSession(authUser){var row=await getProfileForAuth(authUser);if(!row)return null;var u=row.profile_data||{};u.id=row.id;u.name=row.name||u.name;u.email=row.email||u.email||authUser.email||'';u.authUserId=authUser.id;APP_DATA.users[u.id]=u;SESSION.currentUserId=u.id;await saveSess();await syncSharedState(false);return u;}
-async function ensureAuthAccount(email,password){var sr=await DS_SUPABASE.auth.signUp({email:email,password:password});if(sr.error){if(/already registered|user already registered/i.test(sr.error.message)){var si=await DS_SUPABASE.auth.signInWithPassword({email:email,password:password});if(si.error)throw si.error;return si.data.user;}throw sr.error;}return sr.data.user;}
+async function saveRemoteUser(u){var r=await DS_SUPABASE.from('profiles').upsert({id:u.id,name:u.name||'',email:u.email||'',profile_data:u},{onConflict:'id'});if(r.error)throw r.error;}
 async function saveRemoteCouple(c){var r=await DS_SUPABASE.from('couples').upsert({id:c.id,partner_one:c.member1,partner_two:c.member2,status:c.status||'connected',couple_data:c},{onConflict:'id'});if(r.error)throw r.error;}
 async function saveRemoteInvite(code,inv){var r=await DS_SUPABASE.from('invites').upsert({id:inv.id||undefined,code:code,inviter_id:inv.creatorId,couple_id:inv.coupleId||null,status:inv.used?'used':'pending'},{onConflict:'code'});if(r.error)throw r.error;}
 
@@ -2261,36 +2257,59 @@ async function syncSharedState(showConnectedToast){
   var old=APP_DATA.users[before]||{};
   var oldCouple=old.coupleId||null;var oldPartner=old.partnerId||null;
   try{
+    // Always refresh the signed-in profile first.
     var pr=await DS_SUPABASE.from('profiles').select('*').eq('id',before).maybeSingle();
     if(pr.error)throw pr.error;
     if(!pr.data)return false;
-    var u=pr.data.profile_data||{};
-    u.id=pr.data.id;u.name=pr.data.name||u.name;u.email=pr.data.email||u.email||'';u.authUserId=pr.data.auth_user_id||u.authUserId||null;
+    var u=pr.data.profile_data||{};u.id=pr.data.id;u.name=pr.data.name||u.name;u.email=pr.data.email||u.email||'';
+    APP_DATA.users[before]=u;
 
-    // Do not depend on profile_data.coupleId being current. Find the couple directly.
-    var cr=await DS_SUPABASE.from('couples').select('*').or('partner_one.eq.'+before+',partner_two.eq.'+before).order('created_at',{ascending:false}).limit(1).maybeSingle();
+    // IMPORTANT: do not rely only on profile_data.coupleId. After a partner
+    // joins, the canonical relationship is the couples row. Find it directly
+    // by either member id so the creator's dashboard cannot remain "pending".
+    var cr=await DS_SUPABASE.from('couples').select('*')
+      .or('partner_one.eq.'+before+',partner_two.eq.'+before)
+      .maybeSingle();
     if(cr.error)throw cr.error;
+
     if(cr.data){
-      var cd=cr.data.couple_data||{};cd.id=cr.data.id;cd.member1=cd.member1||cr.data.partner_one;cd.member2=cd.member2||cr.data.partner_two;cd.status=cr.data.status||cd.status||'connected';
-      APP_DATA.couples[cd.id]=cd;u.coupleId=cd.id;
-      var pid=cd.member1===before?cd.member2:cd.member1;
+      var cd=cr.data.couple_data||{};
+      cd.id=cr.data.id;
+      cd.member1=cd.member1||cr.data.partner_one;
+      cd.member2=cd.member2||cr.data.partner_two;
+      cd.status=cr.data.status||cd.status||'connected';
+      APP_DATA.couples[cd.id]=cd;
+      u.coupleId=cd.id;
+      var pid=cd.member1===u.id?cd.member2:cd.member1;
       if(pid){
         var pp=await DS_SUPABASE.from('profiles').select('*').eq('id',pid).maybeSingle();
         if(pp.error)throw pp.error;
         if(pp.data){
-          var pu=pp.data.profile_data||{};pu.id=pp.data.id;pu.name=pp.data.name||pu.name;pu.email=pp.data.email||pu.email||'';pu.authUserId=pp.data.auth_user_id||pu.authUserId||null;
-          APP_DATA.users[pid]=pu;u.partnerId=pid;u.partnerName=pu.name;u.partnerCity=pu.city;
+          var pu=pp.data.profile_data||{};
+          pu.id=pp.data.id;pu.name=pp.data.name||pu.name;pu.email=pp.data.email||pu.email||'';
+          APP_DATA.users[pid]=pu;
+          u.partnerId=pid;u.partnerName=pu.name;u.partnerCity=pu.city;
         }
       }
+      // Persist the relationship pointers back onto the current user's
+      // profile_data so future sessions start connected too.
+      await DS_SUPABASE.from('profiles').upsert({
+        id:u.id,name:u.name||'',email:u.email||'',profile_data:u
+      },{onConflict:'id'});
+      APP_DATA.users[u.id]=u;
     } else {
+      // No couple means genuinely waiting; keep the invite flow intact.
       u.coupleId=null;
+      APP_DATA.users[u.id]=u;
     }
-    APP_DATA.users[before]=u;
+
     SESSION.currentUserId=u.id;await saveSess();
-    var justConnected=!!(u.coupleId&&!oldCouple);var partnerChanged=!!(u.partnerId&&u.partnerId!==oldPartner);
-    if(justConnected||partnerChanged){if(showConnectedToast)showToast('❤️ '+(u.partnerName||'Your partner')+' joined DuoSpark!');renderApp();return true;}
-    // Keep the dashboard current even when the relationship state changed but did not trigger the toast.
-    if(oldCouple!==u.coupleId || oldPartner!==u.partnerId)renderApp();
+    var justConnected=!!(u.coupleId&&!oldCouple);
+    var partnerChanged=!!(u.partnerId&&u.partnerId!==oldPartner);
+    if(justConnected||partnerChanged){
+      if(showConnectedToast)showToast('❤️ '+(u.partnerName||'Your partner')+' joined DuoSpark!');
+      renderApp();return true;
+    }
     return false;
   }catch(e){console.warn('Shared sync failed',e);return false;}
 }
@@ -2310,13 +2329,6 @@ function sc(id){var el=document.getElementById(id);if(el)el.scrollIntoView({beha
 
 async function init(){
   await loadAppData();
-  try{
-    var authSession=await DS_SUPABASE.auth.getSession();
-    if(authSession.data&&authSession.data.session&&authSession.data.session.user){
-      var au=await finishAuthSession(authSession.data.session.user);
-      if(au){showView('app');renderApp();return;}
-    }
-  }catch(e){console.warn('Auth session check failed',e);}
   var params=new URLSearchParams(window.location.search);
   if(params.has('invite')){
     var code=params.get('invite').toUpperCase();
@@ -2442,98 +2454,39 @@ var DS_GEO={
   "France":{code:"+33",states:["Auvergne-Rhône-Alpes","Bourgogne-Franche-Comté","Brittany","Centre-Val de Loire","Corsica","Grand Est","Hauts-de-France","Île-de-France","Normandy","Nouvelle-Aquitaine","Occitanie","Pays de la Loire","Provence-Alpes-Côte d'Azur"]},
   "Japan":{code:"+81",states:["Aichi","Akita","Aomori","Chiba","Ehime","Fukui","Fukuoka","Fukushima","Gifu","Gunma","Hiroshima","Hokkaido","Hyogo","Ibaraki","Ishikawa","Iwate","Kagawa","Kagoshima","Kanagawa","Kochi","Kumamoto","Kyoto","Mie","Miyagi","Miyazaki","Nagano","Nagasaki","Nara","Niigata","Oita","Okayama","Okinawa","Osaka","Saga","Saitama","Shiga","Shimane","Shizuoka","Tochigi","Tokushima","Tokyo","Tottori","Toyama","Wakayama","Yamagata","Yamaguchi","Yamanashi"]},
   "South Korea":{code:"+82",states:["Seoul","Busan","Daegu","Incheon","Gwangju","Daejeon","Ulsan","Sejong","Gyeonggi","Gangwon","North Chungcheong","South Chungcheong","North Jeolla","South Jeolla","North Gyeongsang","South Gyeongsang","Jeju"]},
-  "Other":{code:"+",states:["Other"]}
-};
-var DS_CITIES={
-  "India":{
-    "Andhra Pradesh":["Amaravati","Visakhapatnam","Vijayawada","Guntur","Tirupati","Nellore","Kurnool","Rajahmundry","Kakinada"],
-    "Arunachal Pradesh":["Itanagar","Tawang","Naharlagun","Pasighat"],
-    "Assam":["Guwahati","Dibrugarh","Silchar","Jorhat","Tezpur"],
-    "Bihar":["Patna","Gaya","Muzaffarpur","Bhagalpur","Darbhanga","Purnia"],
-    "Chhattisgarh":["Raipur","Bhilai","Durg","Bilaspur","Korba","Jagdalpur","Raigarh"],
-    "Goa":["Panaji","Margao","Vasco da Gama","Mapusa","Ponda"],
-    "Gujarat":["Ahmedabad","Surat","Vadodara","Rajkot","Gandhinagar","Bhavnagar","Jamnagar","Junagadh","Anand","Navsari","Vapi","Bharuch","Porbandar","Mehsana"],
-    "Haryana":["Gurugram","Faridabad","Panipat","Ambala","Hisar","Karnal","Rohtak","Sonipat","Panchkula"],
-    "Himachal Pradesh":["Shimla","Manali","Dharamshala","Solan","Mandi","Kullu"],
-    "Jharkhand":["Ranchi","Jamshedpur","Dhanbad","Bokaro","Deoghar","Hazaribagh"],
-    "Karnataka":["Bengaluru","Mysuru","Mangaluru","Hubballi","Dharwad","Belagavi","Shivamogga","Udupi","Tumakuru","Ballari","Kalaburagi"],
-    "Kerala":["Thiruvananthapuram","Kochi","Kozhikode","Thrissur","Kollam","Kannur","Alappuzha","Kottayam","Palakkad","Kasaragod"],
-    "Madhya Pradesh":["Bhopal","Indore","Jabalpur","Gwalior","Ujjain","Sagar","Rewa","Satna","Ratlam","Dewas"],
-    "Maharashtra":["Mumbai","Pune","Nagpur","Nashik","Aurangabad","Thane","Navi Mumbai","Kolhapur","Sangli","Solapur","Amravati","Satara","Lonavala","Alibag"],
-    "Manipur":["Imphal","Churachandpur","Thoubal"],
-    "Meghalaya":["Shillong","Tura","Cherrapunji"],
-    "Mizoram":["Aizawl","Lunglei","Champhai"],
-    "Nagaland":["Kohima","Dimapur","Mokokchung"],
-    "Odisha":["Bhubaneswar","Cuttack","Puri","Rourkela","Berhampur","Sambalpur","Balasore"],
-    "Punjab":["Chandigarh","Amritsar","Ludhiana","Jalandhar","Patiala","Bathinda","Mohali","Pathankot"],
-    "Rajasthan":["Jaipur","Jodhpur","Udaipur","Kota","Ajmer","Bikaner","Pushkar","Alwar","Bharatpur","Jaisalmer"],
-    "Sikkim":["Gangtok","Namchi","Pelling"],
-    "Tamil Nadu":["Chennai","Coimbatore","Madurai","Tiruchirappalli","Salem","Tirunelveli","Erode","Vellore","Thoothukudi","Thanjavur","Ooty","Kodaikanal"],
-    "Telangana":["Hyderabad","Warangal","Nizamabad","Karimnagar","Khammam","Secunderabad"],
-    "Tripura":["Agartala","Udaipur","Dharmanagar"],
-    "Uttar Pradesh":["Lucknow","Noida","Greater Noida","Ghaziabad","Kanpur","Agra","Varanasi","Prayagraj","Meerut","Bareilly","Gorakhpur","Mathura","Ayodhya","Aligarh","Moradabad","Saharanpur","Jhansi"],
-    "Uttarakhand":["Dehradun","Haridwar","Rishikesh","Nainital","Mussoorie","Haldwani","Almora"],
-    "West Bengal":["Kolkata","Siliguri","Durgapur","Asansol","Howrah","Darjeeling","Kalimpong"],
-    "Andaman and Nicobar Islands":["Port Blair","Havelock Island"],
-    "Chandigarh":["Chandigarh"],
-    "Dadra and Nagar Haveli and Daman and Diu":["Daman","Silvassa","Diu"],
-    "Delhi":["New Delhi","Delhi"],
-    "Jammu and Kashmir":["Srinagar","Jammu","Gulmarg","Pahalgam","Leh"],
-    "Ladakh":["Leh","Kargil"],
-    "Lakshadweep":["Kavaratti","Agatti"],
-    "Puducherry":["Puducherry","Karaikal"]
-  },
-  "United States":{"California":["Los Angeles","San Francisco","San Diego","San Jose","Sacramento"],"New York":["New York City","Buffalo","Rochester","Albany"],"Texas":["Houston","Austin","Dallas","San Antonio","Fort Worth"],"Florida":["Miami","Orlando","Tampa","Jacksonville"],"Illinois":["Chicago","Springfield","Naperville"],"Washington":["Seattle","Spokane","Tacoma"],"Massachusetts":["Boston","Cambridge","Worcester"],"District of Columbia":["Washington, D.C."],"Georgia":["Atlanta","Savannah","Augusta"],"New Jersey":["Newark","Jersey City","Princeton"]},
-  "Canada":{"Ontario":["Toronto","Ottawa","Mississauga","Hamilton"],"Quebec":["Montreal","Quebec City","Laval"],"British Columbia":["Vancouver","Victoria","Kelowna"],"Alberta":["Calgary","Edmonton","Banff"],"Manitoba":["Winnipeg"]},
-  "United Kingdom":{"England":["London","Manchester","Birmingham","Liverpool","Bristol","Leeds","Oxford","Cambridge","Bath"],"Scotland":["Edinburgh","Glasgow","Aberdeen"],"Wales":["Cardiff","Swansea"],"Northern Ireland":["Belfast"]},
-  "Australia":{"New South Wales":["Sydney","Newcastle","Wollongong"],"Victoria":["Melbourne","Geelong"],"Queensland":["Brisbane","Gold Coast","Cairns"],"Western Australia":["Perth"],"South Australia":["Adelaide"],"Tasmania":["Hobart"],"Australian Capital Territory":["Canberra"],"Northern Territory":["Darwin"]},
-  "United Arab Emirates":{"Dubai":["Dubai"],"Abu Dhabi":["Abu Dhabi"],"Sharjah":["Sharjah"],"Ajman":["Ajman"],"Ras Al Khaimah":["Ras Al Khaimah"],"Fujairah":["Fujairah"],"Umm Al Quwain":["Umm Al Quwain"]},
-  "Singapore":{"Singapore":["Singapore"]},
-  "New Zealand":{"Auckland":["Auckland"],"Wellington":["Wellington"],"Canterbury":["Christchurch"],"Otago":["Dunedin"],"Waikato":["Hamilton"]},
-  "Germany":{"Berlin":["Berlin"],"Bavaria":["Munich","Nuremberg"],"Hesse":["Frankfurt"],"Hamburg":["Hamburg"],"North Rhine-Westphalia":["Cologne","Düsseldorf","Dortmund"]},
-  "France":{"Île-de-France":["Paris"],"Provence-Alpes-Côte d'Azur":["Nice","Marseille","Cannes"],"Auvergne-Rhône-Alpes":["Lyon","Grenoble"],"Occitanie":["Toulouse","Montpellier"],"Nouvelle-Aquitaine":["Bordeaux"]},
-  "Japan":{"Tokyo":["Tokyo"],"Osaka":["Osaka"],"Kyoto":["Kyoto"],"Kanagawa":["Yokohama"],"Aichi":["Nagoya"],"Hokkaido":["Sapporo"],"Fukuoka":["Fukuoka"],"Okinawa":["Naha"]},
-  "South Korea":{"Seoul":["Seoul"],"Busan":["Busan"],"Incheon":["Incheon"],"Gyeonggi":["Suwon","Seongnam"],"Jeju":["Jeju City"]},
-  "Other":{"Other":["Other"]}
+  "Other":{code:"+",states:[]}
 };
 function geoOptions(selected){return Object.keys(DS_GEO).map(function(k){return '<option value="'+he(k)+'" '+(selected===k?'selected':'')+'>'+he(k)+'</option>';}).join('');}
-function renderStates(country,selected){var g=DS_GEO[country]||DS_GEO.Other;var el=document.getElementById('f-state');if(!el)return;var list=g.states||[];el.innerHTML='<option value="">Select state / province</option>'+list.map(function(x){return '<option value="'+he(x)+'" '+(selected===x?'selected':'')+'>'+he(x)+'</option>';}).join('');}
-function renderCities(country,state,selected){var el=document.getElementById('f-city');if(!el)return;var list=((DS_CITIES[country]||{})[state]||[]);if(!list.length)list=['Other'];el.innerHTML='<option value="">Select city</option>'+list.map(function(x){return '<option value="'+he(x)+'" '+(selected===x?'selected':'')+'>'+he(x)+'</option>';}).join('');if(selected&&!list.includes(selected)){el.innerHTML+='<option value="'+he(selected)+'" selected>'+he(selected)+'</option>';}}
-function geoStateChanged(){var country=document.getElementById('f-country').value;var state=document.getElementById('f-state').value;ONB.draft.state=state;ONB.draft.city='';renderCities(country,state,'');}
-function updateGeoFields(){var c=document.getElementById('f-country');var country=c?c.value:'India';var g=DS_GEO[country]||DS_GEO.Other;var code=document.getElementById('f-phone-code');if(code)code.value=g.code;renderStates(country,ONB.draft.state||'');renderCities(country,ONB.draft.state||'',ONB.draft.city||'');}
+function renderStates(country,selected){var g=DS_GEO[country]||DS_GEO.Other;var el=document.getElementById('f-state');if(!el)return;var list=g.states||[];if(!list.length){el.outerHTML='<input type="text" id="f-state" value="'+he(selected||'')+'" placeholder="State / Province / Region"/>';return;}el.innerHTML='<option value="">Select state / province</option>'+list.map(function(x){return '<option value="'+he(x)+'" '+(selected===x?'selected':'')+'>'+he(x)+'</option>';}).join('');}
+function updateGeoFields(){var c=document.getElementById('f-country');var country=c?c.value:'India';var g=DS_GEO[country]||DS_GEO.Other;var code=document.getElementById('f-phone-code');if(code)code.value=g.code;renderStates(country,ONB.draft.state||'');}
 function phoneDigits(v){return String(v||'').replace(/\D/g,'');}
 function validatePhone(country,phone){var d=phoneDigits(phone);var rules={"India":10,"United States":10,"Canada":10,"United Kingdom":10,"Australia":9,"United Arab Emirates":9,"Singapore":8,"New Zealand":9,"Germany":10,"France":9,"Japan":10,"South Korea":10};var n=rules[country];return n?d.length===n:(d.length>=7&&d.length<=15);}
 
 function r2(){
   var d=ONB.draft;
-  var country=d.phoneCountry||d.country||'India';
-  var state=d.state||'';
-  card('<div class="eyebrow">Reach you</div><h2>How can we reach you?</h2><p class="lede sm">We use this for reminders, sign-in, and location-based date ideas.</p>'+
+  var country=d.country||'India';
+  card('<div class="eyebrow">Reach you</div><h2>How can we reach you?</h2><p class="lede sm">We use this for reminders and to personalize dates to your location.</p>'+
     '<div class="field"><label>Email</label><input type="email" id="f-email" value="'+he(d.email||'')+'" placeholder="riya@example.com" autocomplete="email" autofocus/></div>'+
-    '<div class="field"><label>Account password</label><input type="password" id="f-password" value="'+he(d.password||'')+'" placeholder="At least 6 characters" autocomplete="new-password" minlength="6"/></div>'+
-    '<div class="field-help" style="margin-top:-8px;margin-bottom:14px">Your password is handled by Supabase Auth — DuoSpark never stores it in your profile.</div>'+
     '<div class="field"><label>Phone / WhatsApp country</label><select id="f-country" onchange="updateGeoFields()">'+geoOptions(country)+'</select></div>'+
     '<div class="field-row"><div class="field"><label>Country code</label><input type="text" id="f-phone-code" value="'+he((DS_GEO[country]||DS_GEO.Other).code)+'" readonly/></div>'+
     '<div class="field"><label>Phone / WhatsApp number</label><input type="tel" id="f-wa" value="'+he(d.phone||'')+'" placeholder="9876543210" inputmode="numeric" autocomplete="tel"/></div></div>'+
-    '<div class="field-help" style="margin-top:-8px;margin-bottom:14px">Choose your country first. We validate the expected number length.</div>'+
-    '<div class="field"><label>State / Province</label><select id="f-state" onchange="geoStateChanged()"><option value="">Select state / province</option></select></div>'+
-    '<div class="field"><label>Your city</label><select id="f-city" onchange="ONB.draft.city=this.value"><option value="">Select city</option></select><div class="field-help">We use city to tailor local date ideas.</div></div>'+
+    '<div class="field-help" style="margin-top:-8px;margin-bottom:14px">Select your country first. DuoSpark will validate the expected number length and add the country code.</div>'+
+    '<div class="field"><label>State / Province</label><select id="f-state" onchange="ONB.draft.state=this.value"><option value="">Select state / province</option></select></div>'+
+    '<div class="field"><label>Your city</label><input type="text" id="f-city" value="'+he(d.city||'')+'" placeholder="e.g. Gurgaon" autocomplete="address-level2"/><div class="field-help">City stays free text so we can support cities worldwide.</div></div>'+
     '<button class="btn btn-coral btn-block" onclick="sv2()">Continue <i class="ti ti-arrow-right"></i></button>');
-  renderStates(country,state);renderCities(country,state,d.city||'');
+  renderStates(country,d.state||'');
 }
-
 function sv2(){
-  var e=document.getElementById('f-email').value.trim().toLowerCase(),pw=document.getElementById('f-password').value,country=document.getElementById('f-country').value,code=(DS_GEO[country]||DS_GEO.Other).code,w=document.getElementById('f-wa').value.trim(),state=document.getElementById('f-state').value.trim(),c=document.getElementById('f-city').value.trim();
+  var e=document.getElementById('f-email').value.trim().toLowerCase(),country=document.getElementById('f-country').value,code=(DS_GEO[country]||DS_GEO.Other).code,w=document.getElementById('f-wa').value.trim(),state=document.getElementById('f-state').value.trim(),c=document.getElementById('f-city').value.trim();
   if(!e||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))return showToast('Please enter a valid email address');
-  if(!pw||pw.length<6)return showToast('Please create a password with at least 6 characters');
   if(!w||!validatePhone(country,w))return showToast('Please enter a valid '+country+' phone number');
   if(!state)return showToast('Please select your state / province');
-  if(!c||c==='Other')return showToast('Please select your city');
-  ONB.draft.email=e;ONB.draft.password=pw;ONB.draft.phone=w;ONB.draft.whatsapp=code+' '+phoneDigits(w);ONB.draft.phoneCountry=country;ONB.draft.phoneCode=code;ONB.draft.state=state;ONB.draft.city=c;onbNext();
+  if(!c)return showToast('Please enter your city');
+  ONB.draft.email=e;ONB.draft.phone=w;ONB.draft.whatsapp=code+' '+phoneDigits(w);ONB.draft.phoneCountry=country;ONB.draft.phoneCode=code;ONB.draft.state=state;ONB.draft.city=c;onbNext();
 }
 
 function r3(){
-  if(ONB.isPartner){var inv=APP_DATA.invites[ONB.invCode];if(!inv)return showToast('Invite could not be loaded. Please reopen the link.');var cr=APP_DATA.users[inv.creatorId];if(!cr)return showToast('We could not load your partner profile. Please reopen the invite.');ONB.draft.mode=cr.mode;onbNext();return;}
+  if(ONB.isPartner){var inv=APP_DATA.invites[ONB.invCode];var cr=APP_DATA.users[inv.creatorId];ONB.draft.mode=cr.mode;onbNext();return;}
   var d=ONB.draft;
   card('<div class="eyebrow">Your relationship</div><h2>What does your relationship look like?</h2><p class="lede sm">We adapt the entire experience to this.</p>'+
     '<div class="mode-grid">'+modeT('newly-dating','ti-heart','Newly dating','First six months. Lots to discover.')+modeT('long-distance','ti-plane','Long-distance','Different cities, time zones.')+modeT('engaged','ti-diamond','Engaged but apart','Building toward forever.')+modeT('living-together','ti-home','Living together','Same city or roof. Every day.')+'</div>'+
@@ -2543,7 +2496,7 @@ function modeT(v,ico,t,s){return'<div class="mode-tile '+(ONB.draft.mode===v?'se
 function sv3(){if(!ONB.draft.mode)return showToast('Please pick a relationship mode');onbNext();}
 
 function r4(){
-  if(ONB.isPartner){var inv=APP_DATA.invites[ONB.invCode];if(!inv)return showToast('Invite could not be loaded. Please reopen the link.');var cr=APP_DATA.users[inv.creatorId];if(!cr)return showToast('We could not load your partner profile. Please reopen the invite.');ONB.draft.partnerName=cr.name;ONB.draft.partnerCity=cr.city;onbNext();return;}
+  if(ONB.isPartner){var inv=APP_DATA.invites[ONB.invCode];var cr=APP_DATA.users[inv.creatorId];ONB.draft.partnerName=cr.name;ONB.draft.partnerCity=cr.city;onbNext();return;}
   var d=ONB.draft;var same=d.mode==='living-together';
   card('<div class="eyebrow">About your partner</div><h2>Tell us about them.</h2><p class="lede sm">They\'ll fill in their own profile when they accept your invite.</p>'+
     '<div class="field"><label>Partner\'s name</label><input type="text" id="f-pname" value="'+he(d.partnerName||'')+'" placeholder="e.g. Arjun" autofocus/></div>'+
@@ -2608,12 +2561,7 @@ async function r14(){
   var sp={duration:ONB.draft.duration,interests:ONB.draft.interests,loveLang:ONB.draft.loveLang,partnerLang:ONB.draft.partnerLang,diet:ONB.draft.diet,allergies:ONB.draft.allergies,budget:ONB.draft.budget,languages:ONB.draft.languages,freeTime:ONB.draft.freeTime,missing:ONB.draft.missing};
   var user={id:userId,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:null,coupleId:null,mode:ONB.draft.mode,partnerName:ONB.draft.partnerName,partnerCity:ONB.draft.partnerCity,sparkProfile:sp,inviteCode:code,createdAt:new Date().toISOString()};
   var inv={creatorId:userId,createdAt:new Date().toISOString(),used:false,status:'pending'};
-  try{
-    var existing=await DS_SUPABASE.from('profiles').select('id').eq('email',ONB.draft.email).maybeSingle();if(existing.error)throw existing.error;if(existing.data)return showToast('An account already exists with this email. Please use Sign in.');
-    var authUser=await ensureAuthAccount(ONB.draft.email,ONB.draft.password);
-    user.authUserId=authUser?authUser.id:null;
-    await saveRemoteUser(user);await saveRemoteInvite(code,inv);
-  }catch(e){console.error(e);showToast(e&&e.message&&/already registered/i.test(e.message)?'An account already exists. Please use Sign in.':'Could not create your DuoSpark account. Please try again.');return;}
+  try{await saveRemoteUser(user);await saveRemoteInvite(code,inv);}catch(e){console.error(e);showToast('Could not create your DuoSpark account. Please try again.');return;}
   APP_DATA.users[userId]=user;APP_DATA.invites[code]=inv;SESSION.currentUserId=userId;ONB.draft._uid=userId;ONB.draft._code=code;
   await save();await saveSess();
   var link=DUOSPARK_APP_URL+'?invite='+code;var waMsg=encodeURIComponent('Hey '+ONB.draft.partnerName+', I just signed up for DuoSpark — a date-night app for couples. Join me: '+link);
@@ -2638,14 +2586,17 @@ async function finalizePartner(){
     var uid2=crypto.randomUUID();
     var sp={duration:ONB.draft.duration,interests:ONB.draft.interests,loveLang:ONB.draft.loveLang,partnerLang:ONB.draft.partnerLang,diet:ONB.draft.diet,allergies:ONB.draft.allergies||'',budget:ONB.draft.budget,languages:ONB.draft.languages,freeTime:ONB.draft.freeTime,missing:ONB.draft.missing};
     var user={id:uid2,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:cr.id,coupleId:null,mode:cr.mode,partnerName:cr.name,partnerCity:cr.city,sparkProfile:sp,inviteCode:null,createdAt:new Date().toISOString()};
-    var authUser=await ensureAuthAccount(ONB.draft.email,ONB.draft.password);user.authUserId=authUser?authUser.id:null;
     var cid=crypto.randomUUID();
     var couple={id:cid,member1:cr.id,member2:uid2,mode:cr.mode,matchedDates:[],completedDates:[],letters:[],sparkAnswers:[],status:'connected',createdAt:new Date().toISOString(),pairedAt:new Date().toISOString()};
     cr.partnerId=uid2;cr.coupleId=cid;
-    var a=await DS_SUPABASE.from('profiles').upsert({id:uid2,name:user.name,email:user.email||'',auth_user_id:user.authUserId||null,profile_data:user},{onConflict:'id'});if(a.error)throw a.error;
-    var b=await DS_SUPABASE.from('profiles').update({name:cr.name,email:cr.email||'',profile_data:cr}).eq('id',cr.id);if(b.error)throw b.error;
+    var a=await DS_SUPABASE.from('profiles').upsert({id:uid2,name:user.name,email:user.email||'',profile_data:user},{onConflict:'id'});if(a.error)throw a.error;
+    var b=await DS_SUPABASE.from('profiles').upsert({id:cr.id,name:cr.name,email:cr.email||'',profile_data:cr},{onConflict:'id'});if(b.error)throw b.error;
     var c=await DS_SUPABASE.from('couples').upsert({id:cid,partner_one:cr.id,partner_two:uid2,status:'connected',couple_data:couple},{onConflict:'id'});if(c.error)throw c.error;
     var d=await DS_SUPABASE.from('invites').update({couple_id:cid,status:'used'}).eq('code',code);if(d.error)throw d.error;
+    // Final canonical state: both profiles point to the same couple, and the
+    // invite is consumed. This is what the creator's polling uses.
+    var vr=await DS_SUPABASE.from('profiles').upsert({id:cr.id,name:cr.name||'',email:cr.email||'',profile_data:cr},{onConflict:'id'});if(vr.error)throw vr.error;
+    var ur=await DS_SUPABASE.from('profiles').upsert({id:uid2,name:user.name||'',email:user.email||'',profile_data:user},{onConflict:'id'});if(ur.error)throw ur.error;
     APP_DATA.users[cr.id]=cr;APP_DATA.users[uid2]=user;APP_DATA.couples[cid]=couple;APP_DATA.invites[code]={id:invRow.id,creatorId:cr.id,coupleId:cid,used:true,status:'used',createdAt:invRow.created_at};
     SESSION.currentUserId=uid2;ONB.draft._uid=uid2;await save();await saveSess();onbNext();
   }catch(e){console.error('finalizePartner failed',e);showToast('Could not connect right now. Please try again.');}
@@ -2665,41 +2616,25 @@ function r15(){
 function enterApp(){showView('app');renderApp();}
 
 function renderSignIn(){
-  card('<div class="eyebrow">Welcome back</div><h2>Sign in to DuoSpark.</h2><p class="lede sm">Use your email or phone number with your DuoSpark password.</p>'+
-    '<div class="field"><label>Email or phone number</label><input type="text" id="si-id" placeholder="you@example.com or 9876543210" autocomplete="username" autofocus/></div>'+
-    '<div class="field"><label>Password</label><input type="password" id="si-password" placeholder="Your password" autocomplete="current-password"/></div>'+
-    '<button class="btn btn-coral btn-block" onclick="doSignIn()">Sign in <i class="ti ti-arrow-right"></i></button>'+
-    '<div style="display:flex;align-items:center;gap:10px;margin:18px 0;color:var(--inkm);font-size:11px"><span style="height:1px;background:var(--ls);flex:1"></span><span>OR</span><span style="height:1px;background:var(--ls);flex:1"></span></div>'+
-    '<button class="btn btn-paper btn-block" onclick="signInGoogle()"><i class="ti ti-brand-google"></i> Continue with Google</button>'+
-    '<p class="skip-ln" style="margin-top:14px">No account? <a onclick="startSignup()">Create one</a></p>');
+  card('<div class="eyebrow">Welcome back</div><h2>Sign in to DuoSpark.</h2><p class="lede sm">Use the email you signed up with. No password yet — this is a beta.</p>'+
+    '<div class="field"><label>Email</label><input type="email" id="si-email" placeholder="riya@example.com" autofocus/></div>'+
+    '<button class="btn btn-coral btn-block" onclick="doSignIn()">Sign in <i class="ti ti-arrow-right"></i></button><p class="skip-ln">No account? <a onclick="startSignup()">Create one</a></p>');
 }
 async function doSignIn(){
-  var identifier=document.getElementById('si-id').value.trim(),pw=document.getElementById('si-password').value;
-  if(!identifier)return showToast('Enter your email or phone number');
-  if(!pw||pw.length<6)return showToast('Enter your password');
+  var e=document.getElementById('si-email').value.trim().toLowerCase();
+  if(!e||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))return showToast('Enter a valid email address');
   try{
-    var email=identifier.toLowerCase();
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
-      var digits=phoneDigits(identifier);if(digits.length<7)return showToast('Enter a valid email or phone number');
-      var pr=await DS_SUPABASE.from('profiles').select('*').eq('profile_data->>phone',digits).maybeSingle();
-      if(pr.error)throw pr.error;if(!pr.data)return showToast('No DuoSpark account found for this phone number');email=(pr.data.email||'').toLowerCase();if(!email)return showToast('This account needs an email before it can sign in with a phone number');
-    }
-    var si=await DS_SUPABASE.auth.signInWithPassword({email:email,password:pw});
-    if(si.error){
-      // Existing DuoSpark accounts created before Auth can be upgraded on first sign-in.
-      var prof=await DS_SUPABASE.from('profiles').select('*').eq('email',email).maybeSingle();if(prof.error)throw prof.error;
-      if(prof.data){
-        var su=await DS_SUPABASE.auth.signUp({email:email,password:pw});
-        if(su.error)throw si.error;
-        if(su.data.user){await linkAuthUser(prof.data.id,su.data.user.id);var u0=prof.data.profile_data||{};u0.id=prof.data.id;u0.authUserId=su.data.user.id;APP_DATA.users[u0.id]=u0;SESSION.currentUserId=u0.id;await saveSess();await syncSharedState(false);enterApp();if(!su.data.session)showToast('Account linked. Check your email if verification is required.');return;}
-      }
-      throw si.error;
-    }
-    var u=await finishAuthSession(si.data.user);if(!u)return showToast('Google/account exists, but no DuoSpark profile was found. Please create your DuoSpark profile first.');enterApp();
-  }catch(err){console.error('sign in failed',err);showToast('Could not sign in. Check your details and try again.');}
-}
-async function signInGoogle(){
-  try{var r=await DS_SUPABASE.auth.signInWithOAuth({provider:'google',options:{redirectTo:DUOSPARK_APP_URL}});if(r.error)throw r.error;}catch(e){console.error('Google sign in failed',e);showToast('Google sign-in is not configured yet.');}
+    var r=await DS_SUPABASE.from('profiles').select('*').eq('email',e).maybeSingle();
+    if(r.error)throw r.error;
+    if(!r.data)return showToast('No DuoSpark account found for this email');
+    var u=r.data.profile_data||{};u.id=r.data.id;u.name=r.data.name||u.name;u.email=r.data.email||e;
+    APP_DATA.users[u.id]=u;SESSION.currentUserId=u.id;await saveSess();await syncSharedState(false);enterApp();
+  }catch(err){
+    console.error('sign in failed',err);
+    var local=Object.values(APP_DATA.users).find(function(x){return (x.email||'').toLowerCase()===e;});
+    if(local){SESSION.currentUserId=local.id;await saveSess();enterApp();return;}
+    showToast('Could not sign in right now. Please try again.');
+  }
 }
 
 function rt(key,value,label,sub,fn){return'<div class="rt '+(ONB.draft[key]===value?'sel':'')+'" onclick="setF(\''+key+'\',\''+value+'\','+fn.name+')"><div class="rdot"></div><div><strong>'+he(label)+'</strong>'+(sub?'<span>'+he(sub)+'</span>':'')+'</div></div>';}
@@ -2945,21 +2880,11 @@ async function unlockL(id){var u=curUser();var c=coupleOf(u);var l=(c.letters||[
 function renderProfile(){
   var u=curUser();var p=partnerOf(u);var c=coupleOf(u);var sp=u.sparkProfile||{};
   function pr(l,v){return'<div class="pr"><span class="l">'+he(l)+'</span><span class="v">'+he(String(v||'—'))+'</span></div>';}
-  document.getElementById('asc-profile').innerHTML='<h1 class="pg-title">Profile</h1><div class="pg-sub">Your account and couple settings.</div><div class="prof-grid"><div class="prof-c"><h3>Your details</h3>'+pr('Name',u.name)+pr('Age',u.age)+pr('Country',u.country||'—')+pr('State',u.state||'—')+pr('City',u.city)+pr('Email',u.email)+pr('WhatsApp',u.whatsapp)+pr('Gender',u.gender||'—')+'</div><div class="prof-c"><h3>Your partner</h3>'+pr('Partner',u.partnerName)+pr('Partner city',u.partnerCity||u.city)+pr('Mode',prettyMode(u.mode))+pr('Status',c?'✅ Paired':'⏳ Waiting')+'</div><div class="prof-c"><h3>Spark profile</h3>'+pr('Duration',prettyDur(sp.duration))+pr('Interests',(sp.interests||[]).slice(0,3).join(', ')||'—')+pr('Love language',sp.loveLang||'—')+pr('Diet',sp.diet||'—')+pr('Budget',sp.budget||'—')+pr("What's missing",sp.missing||'—')+'</div>'+(p?'<div class="prof-c"><h3>'+he(p.name)+"'s details</h3>"+pr('Name',p.name)+pr('Age',p.age||'—')+pr('City',p.city)+pr('Love language',(p.sparkProfile||{}).loveLang||'—')+pr('Top interests',((p.sparkProfile||{}).interests||[]).slice(0,2).join(', ')||'—')+'</div>':'<div class="prof-c"><h3>'+he(u.partnerName)+' (not joined yet)</h3><p style="font-size:13px;color:var(--inkm)">Once they accept your invite, their profile will appear here.</p></div>')+'</div><div style="margin-top:20px;display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-paper" onclick="signOut()"><i class="ti ti-logout"></i> Sign out</button>'+(u.inviteCode&&!c?'<button class="btn btn-paper" onclick="cpInv()"><i class="ti ti-link"></i> Copy invite link</button>':'')+'</div>';
+  document.getElementById('asc-profile').innerHTML='<h1 class="pg-title">Profile</h1><div class="pg-sub">Your account and couple settings.</div><div class="prof-grid"><div class="prof-c"><h3>Your details</h3>'+pr('Name',u.name)+pr('Age',u.age)+pr('City',u.city)+pr('Email',u.email)+pr('WhatsApp',u.whatsapp)+pr('Gender',u.gender||'—')+'</div><div class="prof-c"><h3>Your partner</h3>'+pr('Partner',u.partnerName)+pr('Partner city',u.partnerCity||u.city)+pr('Mode',prettyMode(u.mode))+pr('Status',c?'✅ Paired':'⏳ Waiting')+'</div><div class="prof-c"><h3>Spark profile</h3>'+pr('Duration',prettyDur(sp.duration))+pr('Interests',(sp.interests||[]).slice(0,3).join(', ')||'—')+pr('Love language',sp.loveLang||'—')+pr('Diet',sp.diet||'—')+pr('Budget',sp.budget||'—')+pr("What's missing",sp.missing||'—')+'</div>'+(p?'<div class="prof-c"><h3>'+he(p.name)+"'s details</h3>"+pr('Name',p.name)+pr('Age',p.age||'—')+pr('City',p.city)+pr('Love language',(p.sparkProfile||{}).loveLang||'—')+pr('Top interests',((p.sparkProfile||{}).interests||[]).slice(0,2).join(', ')||'—')+'</div>':'<div class="prof-c"><h3>'+he(u.partnerName)+' (not joined yet)</h3><p style="font-size:13px;color:var(--inkm)">Once they accept your invite, their profile will appear here.</p></div>')+'</div><div style="margin-top:20px;display:flex;gap:9px;flex-wrap:wrap"><button class="btn btn-paper" onclick="signOut()"><i class="ti ti-logout"></i> Sign out</button>'+(u.inviteCode&&!c?'<button class="btn btn-paper" onclick="cpInv()"><i class="ti ti-link"></i> Copy invite link</button>':'')+'</div>';
 }
 function cpInv(){var u=curUser();var link=DUOSPARK_APP_URL+'?invite='+u.inviteCode;var d=document.createElement('input');document.body.appendChild(d);d.value=link;d.select();document.execCommand('copy');document.body.removeChild(d);showToast('Invite link copied!');}
 
 // ============================================================
-// AUTH SESSION LISTENER
-DS_SUPABASE.auth.onAuthStateChange(function(event,session){
-  if(event==='SIGNED_IN'&&session&&session.user){
-    setTimeout(async function(){
-      try{var u=await finishAuthSession(session.user);if(u){showView('app');renderApp();}}catch(e){console.warn('Auth sign-in sync failed',e);}
-    },0);
-  }
-  if(event==='SIGNED_OUT'){SESSION.currentUserId=null;saveSess();}
-});
-
 // INIT
 // ============================================================
 init();
