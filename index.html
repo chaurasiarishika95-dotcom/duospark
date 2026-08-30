@@ -27,6 +27,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.5;z-
 .btn-ink{background:var(--ink);color:var(--paper)}.btn-ink:hover{background:var(--coral)}
 .btn-ghost{background:transparent;color:var(--ink);border:.5px solid var(--ink)}.btn-ghost:hover{background:var(--ink);color:var(--paper)}
 .btn-paper{background:var(--paper);color:var(--ink);border:.5px solid var(--ls)}.btn-paper:hover{background:var(--cream)}
+.dk-art{position:relative;overflow:hidden}.dk-art:after{content:'';position:absolute;width:90px;height:90px;border-radius:50%;right:-25px;bottom:-28px;background:rgba(255,255,255,.32)}.dk-art .ti{position:relative;z-index:1;filter:drop-shadow(0 3px 5px rgba(31,22,17,.08))}.auth-google .ti{font-size:18px}.auth-email .ti{font-size:17px}.auth-btn{width:100%;justify-content:center;padding:12px 16px;border-radius:100px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .2s}.auth-google{background:#fff;color:var(--ink);border:.5px solid var(--lm)}.auth-google:hover{background:var(--cream);border-color:var(--coral)}.auth-email{background:var(--coral);color:var(--paper);border:none}.auth-email:hover{background:var(--corald)}.auth-divider{display:flex;align-items:center;gap:10px;margin:16px 0;color:var(--inkm);font:11px 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.12em}.auth-divider:before,.auth-divider:after{content:'';height:.5px;background:var(--ls);flex:1}.auth-note{font-size:11px;color:var(--inkm);line-height:1.5;margin-top:8px}.hero-visual-note{font:11px 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.14em;color:var(--coral);margin-top:14px}
 .btn-block{width:100%;justify-content:center;padding:13px 20px}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 /* FORMS */
@@ -384,7 +385,7 @@ footer{background:var(--ink);color:var(--paper);padding:76px 0 30px}
       <a onclick="sc('dates')">Sample dates</a>
       <a onclick="sc('modes')">Who it's for</a>
       <a onclick="sc('about')">About</a>
-      <a class="btn btn-paper" onclick="startSignin()" style="font-size:12px;padding:9px 16px">Sign in</a>
+      <a class="btn btn-ghost" onclick="startSignin()" style="font-size:12px;padding:9px 16px;border-color:var(--coral);color:var(--corald);font-weight:600">Sign in</a>
       <a class="btn btn-ink" onclick="startSignup()">Join the beta</a>
     </div>
   </div>
@@ -2240,6 +2241,38 @@ async function loadAppData(){
 }
 async function save(){await storageSet('duospark_v2',JSON.stringify(APP_DATA),true);}
 async function saveSess(){await storageSet('duospark_session',JSON.stringify(SESSION),false);}
+var SHARED_CHANNEL=null;var SHARED_FINGERPRINT='';
+function coupleFingerprint(c){try{return JSON.stringify(c||{});}catch(e){return String(Date.now());}}
+async function persistCoupleLatest(c,mutator){
+  if(!c||!c.id)return false;
+  try{
+    var rr=await DS_SUPABASE.from('couples').select('*').eq('id',c.id).maybeSingle();
+    if(rr.error)throw rr.error;
+    var latest=rr.data?(rr.data.couple_data||{}):{};
+    latest.id=c.id;latest.member1=latest.member1||c.member1;latest.member2=latest.member2||c.member2;latest.status=rr.data&&rr.data.status?rr.data.status:(latest.status||'connected');
+    if(typeof mutator==='function')await mutator(latest);
+    var wr=await DS_SUPABASE.from('couples').upsert({id:latest.id,partner_one:latest.member1,partner_two:latest.member2,status:latest.status||'connected',couple_data:latest},{onConflict:'id'});
+    if(wr.error)throw wr.error;
+    APP_DATA.couples[latest.id]=latest;SHARED_FINGERPRINT=coupleFingerprint(latest);await save();return true;
+  }catch(e){console.warn('Could not persist shared couple',e);return false;}
+}
+function renderCurrentAppScreen(){
+  var active=document.querySelector('.ascreen.active');if(!active)return;
+  var id=active.id.replace('asc-','');
+  if(id==='home')renderHome();else if(id==='discover')renderDiscover();else if(id==='room')renderRoom();else if(id==='memory')renderMemoryWall();else if(id==='letters')renderLetters();else if(id==='profile')renderProfile();
+}
+async function startSharedRealtime(){
+  try{
+    if(SHARED_CHANNEL)DS_SUPABASE.removeChannel(SHARED_CHANNEL);
+    SHARED_CHANNEL=DS_SUPABASE.channel('duospark-shared-'+SESSION.currentUserId)
+      .on('postgres_changes',{event:'*',schema:'public',table:'couples'},function(payload){
+        var u=curUser();if(!u)return;var row=payload.new||payload.old;if(!row)return;
+        if(row.id===u.coupleId||row.partner_one===u.id||row.partner_two===u.id){syncSharedState(true);}
+      }).subscribe();
+  }catch(e){console.warn('Realtime unavailable; polling remains active.',e);}
+}
+function stopSharedRealtime(){if(SHARED_CHANNEL){try{DS_SUPABASE.removeChannel(SHARED_CHANNEL);}catch(e){}SHARED_CHANNEL=null;}}
+
 function uid(p){return p+'_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);}
 function genCode(){var c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',s='';for(var i=0;i<6;i++)s+=c[Math.floor(Math.random()*c.length)];return s;}
 function curUser(){return SESSION.currentUserId?APP_DATA.users[SESSION.currentUserId]:null;}
@@ -2252,69 +2285,65 @@ function greet(n){var h=new Date().getHours(),g=h<5?'Late night':h<12?'Good morn
 function he(s){return String(s||'').replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function showToast(msg){var t=document.getElementById('ds-toast');if(!t){t=document.createElement('div');t.id='ds-toast';t.style.cssText='position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:#1F1611;color:#FAF6EC;padding:11px 18px;border-radius:100px;font-size:13px;z-index:999;opacity:0;transition:all .3s;font-family:Geist,sans-serif;pointer-events:none';document.body.appendChild(t);}t.textContent=msg;setTimeout(function(){t.style.transform='translateX(-50%)';t.style.opacity='1';},10);setTimeout(function(){t.style.transform='translateX(-50%) translateY(20px)';t.style.opacity='0';},2400);}
 async function syncSharedState(showConnectedToast){
-  var before=SESSION.currentUserId;
-  if(!before)return false;
-  var old=APP_DATA.users[before]||{};
-  var oldCouple=old.coupleId||null;var oldPartner=old.partnerId||null;
+  var before=SESSION.currentUserId;if(!before)return false;
+  var old=APP_DATA.users[before]||{};var oldCouple=old.coupleId||null;var oldPartner=old.partnerId||null;
   try{
-    // Always refresh the signed-in profile first.
     var pr=await DS_SUPABASE.from('profiles').select('*').eq('id',before).maybeSingle();
-    if(pr.error)throw pr.error;
-    if(!pr.data)return false;
-    var u=pr.data.profile_data||{};u.id=pr.data.id;u.name=pr.data.name||u.name;u.email=pr.data.email||u.email||'';
-    APP_DATA.users[before]=u;
-
-    // IMPORTANT: do not rely only on profile_data.coupleId. After a partner
-    // joins, the canonical relationship is the couples row. Find it directly
-    // by either member id so the creator's dashboard cannot remain "pending".
-    var cr=await DS_SUPABASE.from('couples').select('*')
-      .or('partner_one.eq.'+before+',partner_two.eq.'+before)
-      .maybeSingle();
+    if(pr.error)throw pr.error;if(!pr.data)return false;
+    var u=pr.data.profile_data||{};u.id=pr.data.id;u.name=pr.data.name||u.name;u.email=pr.data.email||u.email||'';APP_DATA.users[before]=u;
+    var cr=await DS_SUPABASE.from('couples').select('*').or('partner_one.eq.'+before+',partner_two.eq.'+before).maybeSingle();
     if(cr.error)throw cr.error;
-
+    var changed=false;
     if(cr.data){
-      var cd=cr.data.couple_data||{};
-      cd.id=cr.data.id;
-      cd.member1=cd.member1||cr.data.partner_one;
-      cd.member2=cd.member2||cr.data.partner_two;
-      cd.status=cr.data.status||cd.status||'connected';
-      APP_DATA.couples[cd.id]=cd;
-      u.coupleId=cd.id;
+      var cd=cr.data.couple_data||{};cd.id=cr.data.id;cd.member1=cd.member1||cr.data.partner_one;cd.member2=cd.member2||cr.data.partner_two;cd.status=cr.data.status||cd.status||'connected';
+      var fp=coupleFingerprint(cd);changed=fp!==SHARED_FINGERPRINT;APP_DATA.couples[cd.id]=cd;SHARED_FINGERPRINT=fp;u.coupleId=cd.id;
       var pid=cd.member1===u.id?cd.member2:cd.member1;
       if(pid){
-        var pp=await DS_SUPABASE.from('profiles').select('*').eq('id',pid).maybeSingle();
-        if(pp.error)throw pp.error;
-        if(pp.data){
-          var pu=pp.data.profile_data||{};
-          pu.id=pp.data.id;pu.name=pp.data.name||pu.name;pu.email=pp.data.email||pu.email||'';
-          APP_DATA.users[pid]=pu;
-          u.partnerId=pid;u.partnerName=pu.name;u.partnerCity=pu.city;
-        }
+        var pp=await DS_SUPABASE.from('profiles').select('*').eq('id',pid).maybeSingle();if(pp.error)throw pp.error;
+        if(pp.data){var pu=pp.data.profile_data||{};pu.id=pp.data.id;pu.name=pp.data.name||pu.name;pu.email=pp.data.email||pu.email||'';APP_DATA.users[pid]=pu;u.partnerId=pid;u.partnerName=pu.name;u.partnerCity=pu.city;}
       }
-      // Persist the relationship pointers back onto the current user's
-      // profile_data so future sessions start connected too.
-      await DS_SUPABASE.from('profiles').upsert({
-        id:u.id,name:u.name||'',email:u.email||'',profile_data:u
-      },{onConflict:'id'});
-      APP_DATA.users[u.id]=u;
-    } else {
-      // No couple means genuinely waiting; keep the invite flow intact.
-      u.coupleId=null;
-      APP_DATA.users[u.id]=u;
-    }
-
+      await DS_SUPABASE.from('profiles').upsert({id:u.id,name:u.name||'',email:u.email||'',profile_data:u},{onConflict:'id'});APP_DATA.users[u.id]=u;
+    }else{u.coupleId=null;APP_DATA.users[u.id]=u;}
     SESSION.currentUserId=u.id;await saveSess();
-    var justConnected=!!(u.coupleId&&!oldCouple);
-    var partnerChanged=!!(u.partnerId&&u.partnerId!==oldPartner);
-    if(justConnected||partnerChanged){
-      if(showConnectedToast)showToast('❤️ '+(u.partnerName||'Your partner')+' joined DuoSpark!');
-      renderApp();return true;
-    }
-    return false;
+    var justConnected=!!(u.coupleId&&!oldCouple),partnerChanged=!!(u.partnerId&&u.partnerId!==oldPartner);
+    if(justConnected||partnerChanged){if(showConnectedToast)showToast('❤️ '+(u.partnerName||'Your partner')+' joined DuoSpark!');renderApp();return true;}
+    if(changed)renderCurrentAppScreen();
+    return changed;
   }catch(e){console.warn('Shared sync failed',e);return false;}
 }
-function startSharedPolling(){stopSharedPolling();SYNC_TIMER=setInterval(function(){if(SESSION.currentUserId)syncSharedState(true);},3000);}
-function stopSharedPolling(){if(SYNC_TIMER){clearInterval(SYNC_TIMER);SYNC_TIMER=null;}}
+function startSharedPolling(){stopSharedPolling();SYNC_TIMER=setInterval(function(){if(SESSION.currentUserId)syncSharedState(true);},2500);startSharedRealtime();}
+function stopSharedPolling(){if(SYNC_TIMER){clearInterval(SYNC_TIMER);SYNC_TIMER=null;}stopSharedRealtime();}
+
+// ============================================================
+// AUTH BRIDGE — free email magic-link + Google OAuth
+// ============================================================
+async function finishAuthSession(session){
+  if(!session||!session.user)return false;
+  var au=session.user;var email=(au.email||'').toLowerCase();
+  try{
+    var r=await DS_SUPABASE.from('profiles').select('*').eq('email',email).maybeSingle();
+    if(r.error)throw r.error;
+    if(r.data){
+      var u=r.data.profile_data||{};u.id=r.data.id;u.name=r.data.name||u.name;u.email=r.data.email||email;u.authUserId=au.id;
+      await DS_SUPABASE.from('profiles').upsert({id:u.id,name:u.name||'',email:u.email||'',profile_data:u},{onConflict:'id'});
+      APP_DATA.users[u.id]=u;SESSION.currentUserId=u.id;await saveSess();await syncSharedState(false);enterApp();return true;
+    }
+    // New Google user: continue onboarding and keep the authenticated identity.
+    ONB.draft.email=email;ONB.draft.authUserId=au.id;startOnboarding('signup',{});ONB.draft.email=email;renderStep();return true;
+  }catch(e){console.warn('Auth session mapping failed',e);showToast('Could not connect this sign-in to DuoSpark.');return false;}
+}
+async function sendEmailSignIn(){
+  var e=(document.getElementById('si-email')||{}).value||'';e=e.trim().toLowerCase();
+  if(!e||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))return showToast('Enter a valid email address');
+  try{
+    var r=await DS_SUPABASE.auth.signInWithOtp({email:e,options:{emailRedirectTo:DUOSPARK_APP_URL}});if(r.error)throw r.error;
+    showToast('Check your email for the DuoSpark sign-in link.');
+  }catch(err){console.error(err);showToast('Could not send sign-in email. Check Supabase Auth email settings.');}
+}
+async function signInGoogle(){
+  try{var r=await DS_SUPABASE.auth.signInWithOAuth({provider:'google',options:{redirectTo:DUOSPARK_APP_URL}});if(r.error)throw r.error;}
+  catch(err){console.error(err);showToast('Google sign-in is not enabled in Supabase yet.');}
+}
 
 // ============================================================
 // VIEW ROUTER
@@ -2329,6 +2358,7 @@ function sc(id){var el=document.getElementById(id);if(el)el.scrollIntoView({beha
 
 async function init(){
   await loadAppData();
+  try{var sr=await DS_SUPABASE.auth.getSession();if(sr.data&&sr.data.session){if(await finishAuthSession(sr.data.session))return;}}catch(e){console.warn('Auth session check failed',e);}
   var params=new URLSearchParams(window.location.search);
   if(params.has('invite')){
     var code=params.get('invite').toUpperCase();
@@ -2557,11 +2587,12 @@ function r13(){
 
 async function r14(){
   if(ONB.isPartner){await finalizePartner();return;}
-  var userId=crypto.randomUUID(),code=genCode();
+  var userId=ONB.draft.authUserId||crypto.randomUUID(),code=genCode();
   var sp={duration:ONB.draft.duration,interests:ONB.draft.interests,loveLang:ONB.draft.loveLang,partnerLang:ONB.draft.partnerLang,diet:ONB.draft.diet,allergies:ONB.draft.allergies,budget:ONB.draft.budget,languages:ONB.draft.languages,freeTime:ONB.draft.freeTime,missing:ONB.draft.missing};
-  var user={id:userId,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:null,coupleId:null,mode:ONB.draft.mode,partnerName:ONB.draft.partnerName,partnerCity:ONB.draft.partnerCity,sparkProfile:sp,inviteCode:code,createdAt:new Date().toISOString()};
+  var user={id:userId,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:null,coupleId:null,mode:ONB.draft.mode,partnerName:ONB.draft.partnerName,partnerCity:ONB.draft.partnerCity,sparkProfile:sp,inviteCode:code,authUserId:ONB.draft.authUserId||null,createdAt:new Date().toISOString()};
   var inv={creatorId:userId,createdAt:new Date().toISOString(),used:false,status:'pending'};
   try{await saveRemoteUser(user);await saveRemoteInvite(code,inv);}catch(e){console.error(e);showToast('Could not create your DuoSpark account. Please try again.');return;}
+  try{await DS_SUPABASE.auth.signInWithOtp({email:user.email,options:{emailRedirectTo:DUOSPARK_APP_URL}});}catch(e){console.warn('Could not send optional sign-in link',e);}
   APP_DATA.users[userId]=user;APP_DATA.invites[code]=inv;SESSION.currentUserId=userId;ONB.draft._uid=userId;ONB.draft._code=code;
   await save();await saveSess();
   var link=DUOSPARK_APP_URL+'?invite='+code;var waMsg=encodeURIComponent('Hey '+ONB.draft.partnerName+', I just signed up for DuoSpark — a date-night app for couples. Join me: '+link);
@@ -2585,7 +2616,7 @@ async function finalizePartner(){
     cr.id=crRes.data.id;cr.name=crRes.data.name||cr.name;cr.email=crRes.data.email||cr.email||'';
     var uid2=crypto.randomUUID();
     var sp={duration:ONB.draft.duration,interests:ONB.draft.interests,loveLang:ONB.draft.loveLang,partnerLang:ONB.draft.partnerLang,diet:ONB.draft.diet,allergies:ONB.draft.allergies||'',budget:ONB.draft.budget,languages:ONB.draft.languages,freeTime:ONB.draft.freeTime,missing:ONB.draft.missing};
-    var user={id:uid2,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:cr.id,coupleId:null,mode:cr.mode,partnerName:cr.name,partnerCity:cr.city,sparkProfile:sp,inviteCode:null,createdAt:new Date().toISOString()};
+    var user={id:uid2,authUserId:ONB.draft.authUserId||null,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:cr.id,coupleId:null,mode:cr.mode,partnerName:cr.name,partnerCity:cr.city,sparkProfile:sp,inviteCode:null,createdAt:new Date().toISOString()};
     var cid=crypto.randomUUID();
     var couple={id:cid,member1:cr.id,member2:uid2,mode:cr.mode,matchedDates:[],completedDates:[],letters:[],sparkAnswers:[],status:'connected',createdAt:new Date().toISOString(),pairedAt:new Date().toISOString()};
     cr.partnerId=uid2;cr.coupleId=cid;
@@ -2597,6 +2628,7 @@ async function finalizePartner(){
     // invite is consumed. This is what the creator's polling uses.
     var vr=await DS_SUPABASE.from('profiles').upsert({id:cr.id,name:cr.name||'',email:cr.email||'',profile_data:cr},{onConflict:'id'});if(vr.error)throw vr.error;
     var ur=await DS_SUPABASE.from('profiles').upsert({id:uid2,name:user.name||'',email:user.email||'',profile_data:user},{onConflict:'id'});if(ur.error)throw ur.error;
+    try{await DS_SUPABASE.auth.signInWithOtp({email:user.email,options:{emailRedirectTo:DUOSPARK_APP_URL}});}catch(e){console.warn('Could not send partner sign-in link',e);}
     APP_DATA.users[cr.id]=cr;APP_DATA.users[uid2]=user;APP_DATA.couples[cid]=couple;APP_DATA.invites[code]={id:invRow.id,creatorId:cr.id,coupleId:cid,used:true,status:'used',createdAt:invRow.created_at};
     SESSION.currentUserId=uid2;ONB.draft._uid=uid2;await save();await saveSess();onbNext();
   }catch(e){console.error('finalizePartner failed',e);showToast('Could not connect right now. Please try again.');}
@@ -2616,26 +2648,9 @@ function r15(){
 function enterApp(){showView('app');renderApp();}
 
 function renderSignIn(){
-  card('<div class="eyebrow">Welcome back</div><h2>Sign in to DuoSpark.</h2><p class="lede sm">Use the email you signed up with. No password yet — this is a beta.</p>'+
-    '<div class="field"><label>Email</label><input type="email" id="si-email" placeholder="riya@example.com" autofocus/></div>'+
-    '<button class="btn btn-coral btn-block" onclick="doSignIn()">Sign in <i class="ti ti-arrow-right"></i></button><p class="skip-ln">No account? <a onclick="startSignup()">Create one</a></p>');
+  card('<div class="eyebrow">Welcome back</div><h2>Sign in to DuoSpark.</h2><p class="lede sm">Use your email for a magic link, or continue with Google. No password to remember.</p>'+    '<div class="field"><label>Email</label><input type="email" id="si-email" placeholder="riya@example.com" autocomplete="email" autofocus/></div>'+    '<button class="auth-btn auth-email" onclick="sendEmailSignIn()"><i class="ti ti-mail"></i> Send me a sign-in link</button>'+    '<div class="auth-divider">or</div>'+    '<button class="auth-btn auth-google" onclick="signInGoogle()"><i class="ti ti-brand-google"></i> Continue with Google</button>'+    '<p class="auth-note"><strong>Phone sign-in:</strong> not enabled in this free build because phone OTP requires an SMS provider. Your phone/WhatsApp number is still stored for DuoSpark features.</p>'+    '<p class="skip-ln">No account? <a onclick="startSignup()">Create one</a></p>');
 }
-async function doSignIn(){
-  var e=document.getElementById('si-email').value.trim().toLowerCase();
-  if(!e||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))return showToast('Enter a valid email address');
-  try{
-    var r=await DS_SUPABASE.from('profiles').select('*').eq('email',e).maybeSingle();
-    if(r.error)throw r.error;
-    if(!r.data)return showToast('No DuoSpark account found for this email');
-    var u=r.data.profile_data||{};u.id=r.data.id;u.name=r.data.name||u.name;u.email=r.data.email||e;
-    APP_DATA.users[u.id]=u;SESSION.currentUserId=u.id;await saveSess();await syncSharedState(false);enterApp();
-  }catch(err){
-    console.error('sign in failed',err);
-    var local=Object.values(APP_DATA.users).find(function(x){return (x.email||'').toLowerCase()===e;});
-    if(local){SESSION.currentUserId=local.id;await saveSess();enterApp();return;}
-    showToast('Could not sign in right now. Please try again.');
-  }
-}
+async function doSignIn(){return sendEmailSignIn();}
 
 function rt(key,value,label,sub,fn){return'<div class="rt '+(ONB.draft[key]===value?'sel':'')+'" onclick="setF(\''+key+'\',\''+value+'\','+fn.name+')"><div class="rdot"></div><div><strong>'+he(label)+'</strong>'+(sub?'<span>'+he(sub)+'</span>':'')+'</div></div>';}
 function ss(key){if(!ONB.draft[key])return showToast('Please pick an option');onbNext();}
@@ -2654,7 +2669,7 @@ function renderApp(){
   startSharedPolling();
 }
 
-async function signOut(){if(!confirm('Sign out?'))return;stopSharedPolling();SESSION.currentUserId=null;await saveSess();showView('marketing');buildMarketing();}
+async function signOut(){if(!confirm('Sign out?'))return;stopSharedPolling();try{await DS_SUPABASE.auth.signOut();}catch(e){}SESSION.currentUserId=null;await saveSess();showView('marketing');buildMarketing();}
 function toggleMenu(){document.getElementById('sidebar').classList.toggle('open');}
 function closeMenu(){document.getElementById('sidebar').classList.remove('open');}
 
@@ -2800,16 +2815,22 @@ function renderDeckCard(d,u,couple){
 
 async function swipeDeck(key,dir){
   var u=curUser();if(!u.coupleId)return showToast('Send your partner the invite link first!');
-  var couple=APP_DATA.couples[u.coupleId];couple.matchedDates=couple.matchedDates||[];
-  var entry=couple.matchedDates.find(function(m){return m.dateKey===key;});
-  if(!entry){entry={id:uid('m'),dateKey:key,swipes:{},status:'pending',createdAt:new Date().toISOString()};couple.matchedDates.push(entry);}
-  entry.swipes[u.id]=dir;
-  if(dir==='right'&&entry.swipes[u.partnerId]==='right'){entry.status='matched';entry.matchedAt=new Date().toISOString();showToast('✨ Match! '+DATES[key].title+' scheduled for Saturday 9 PM');}
-  else showToast(dir==='right'?'Swiped right — waiting for '+(u.partnerName||'partner')+'.':'Passed.');
-  await save();renderHome();
+  var base=coupleOf(u);
+  var ok=await persistCoupleLatest(base,async function(couple){
+    couple.matchedDates=couple.matchedDates||[];var entry=couple.matchedDates.find(function(m){return m.dateKey===key;});
+    if(!entry){entry={id:uid('m'),dateKey:key,swipes:{},status:'pending',createdAt:new Date().toISOString()};couple.matchedDates.push(entry);}
+    entry.swipes=entry.swipes||{};entry.swipes[u.id]=dir;
+    if(dir==='right'&&entry.swipes[u.partnerId]==='right'){entry.status='matched';entry.matchedAt=entry.matchedAt||new Date().toISOString();}
+  });
+  if(!ok)return showToast('Could not sync this choice. Please try again.');
+  var latest=coupleOf(u);var e=latest&&(latest.matchedDates||[]).find(function(m){return m.dateKey===key;});
+  showToast(e&&e.status==='matched'?'✨ Match! '+DATES[key].title+' scheduled for Saturday 9 PM':(dir==='right'?'Swiped right — waiting for '+(u.partnerName||'partner')+'.':'Passed.'));renderHome();
 }
 
-async function sendSpark(idx){var u=curUser();var c=coupleOf(u);var t=document.getElementById('sp-txt').value.trim();if(!t)return showToast('Write your answer first');c.sparkAnswers=c.sparkAnswers||[];c.sparkAnswers.push({id:uid('sp'),userId:u.id,qIdx:idx,text:t,createdAt:new Date().toISOString()});await save();showToast('Saved!');renderHome();}
+async function sendSpark(idx){var u=curUser();var c=coupleOf(u);var t=document.getElementById('sp-txt').value.trim();if(!t)return showToast('Write your answer first');
+  var ok=await persistCoupleLatest(c,async function(latest){latest.sparkAnswers=latest.sparkAnswers||[];latest.sparkAnswers=latest.sparkAnswers.filter(function(a){return !(a.userId===u.id&&a.qIdx===idx);});latest.sparkAnswers.push({id:uid('sp'),userId:u.id,qIdx:idx,text:t,createdAt:new Date().toISOString()});});
+  if(!ok)return showToast('Could not sync your answer. Please try again.');showToast('Saved!');renderHome();
+}
 
 function renderDiscover(){
   var u=curUser();var filters=['all','cooking','crafty','movies','conversation','outdoor','free','festival'];
@@ -2859,7 +2880,10 @@ async function finishDate(key){
   document.querySelectorAll('.ascreen').forEach(function(e){e.classList.remove('active');});document.getElementById('asc-complete').classList.add('active');
   document.getElementById('asc-complete').innerHTML='<div class="complete-box"><i class="ti ti-confetti"></i><h2>Date complete!</h2><p>Write a one-line note — saved to your Memory Wall.</p><div class="cphotos"><div class="cp coral"><i class="ti '+d.icon+'"></i></div><div class="cp sage"><i class="ti '+d.icon+'"></i></div></div><label style="font-size:11px;color:var(--inkm);font-family:DM Mono,monospace;text-transform:uppercase;letter-spacing:.1em;font-weight:500">Your one-line note</label><textarea id="cn" placeholder="e.g. His curry looked like soup but he tried 😄"></textarea><button class="btn btn-coral btn-block" onclick="saveMemory(\''+key+'\')">Save to Memory Wall <i class="ti ti-photo-heart"></i></button><button class="btn btn-paper btn-block" style="margin-top:7px" onclick="goScreen(\'home\')">Skip for now</button></div>';
 }
-async function saveMemory(key){var u=curUser();var c=coupleOf(u);var note=document.getElementById('cn').value.trim()||'A great date night.';c.completedDates=c.completedDates||[];c.completedDates.push({id:uid('cd'),dateKey:key,completedAt:new Date().toISOString(),note1:note,userId1:u.id});var m=(c.matchedDates||[]).find(function(x){return x.dateKey===key;});if(m)m.status='completed';await save();showToast('Saved to Memory Wall!');goScreen('memory');}
+async function saveMemory(key){var u=curUser();var c=coupleOf(u);var note=document.getElementById('cn').value.trim()||'A great date night.';
+  var ok=await persistCoupleLatest(c,async function(latest){latest.completedDates=latest.completedDates||[];latest.completedDates.push({id:uid('cd'),dateKey:key,completedAt:new Date().toISOString(),note1:note,userId1:u.id});var m=(latest.matchedDates||[]).find(function(x){return x.dateKey===key;});if(m)m.status='completed';});
+  if(!ok)return showToast('Could not save this memory. Please try again.');showToast('Saved to Memory Wall!');goScreen('memory');
+}
 
 function renderMemoryWall(){
   var u=curUser();var c=coupleOf(u);var done=c?(c.completedDates||[]).slice().reverse():[];
@@ -2874,8 +2898,8 @@ function renderLetters(){
   document.getElementById('asc-letters').innerHTML='<h1 class="pg-title">Letter Locker</h1><div class="pg-sub">Write letters. Time-lock them for special moments.</div><div class="ll-grid"><div class="ll-blk"><h3>Write to '+he(p?p.name:u.partnerName)+'</h3><textarea id="lt" placeholder="Write something real..."></textarea><div class="trigs">'+Object.keys(trigLabels).map(function(t){return'<div class="trig '+(LL_TRIG===t?'on':'')+'" onclick="setTrig(\''+t+'\')">'+trigLabels[t]+'</div>';}).join('')+'</div>'+(c?'<button class="btn btn-coral" onclick="sendLetter()">Send letter <i class="ti ti-send"></i></button>':'<p style="font-size:12px;color:var(--inkm);font-style:italic">You\'ll be able to send letters once your partner joins.</p>')+'</div><div class="ll-blk"><h3>Letters</h3>'+(letters.length?'<div class="ll-list">'+letters.map(function(l){var lk=l.trigger!=='open-now'&&!l.unlocked;return'<div class="li-item"><div class="li-head"><span class="li-tag">'+he(trigLabels[l.trigger]||l.trigger)+'</span><span class="li-date">'+new Date(l.createdAt).toLocaleDateString('en-IN',{month:'short',day:'numeric'})+'</span></div><div class="li-txt '+(lk?'li-lk':'')+'">'+( lk?'🔒 Locked until triggered.':'<em style="font-family:Fraunces,serif;font-style:italic">'+he(l.text)+'</em>')+'</div><div class="li-from">from '+he(l.fromName)+'</div>'+(lk?'<button class="btn btn-paper" style="margin-top:6px;font-size:11px;padding:5px 11px" onclick="unlockL(\''+l.id+'\')">Unlock now</button>':'')+'</div>';}).join('')+'</div>':'<p style="font-size:13px;color:var(--inkm);font-style:italic">No letters yet. Write one.</p>')+'</div></div>';
 }
 function setTrig(t){LL_TRIG=t;renderLetters();}
-async function sendLetter(){var u=curUser();var c=coupleOf(u);var t=document.getElementById('lt').value.trim();if(!t)return showToast('Write something first');c.letters=c.letters||[];c.letters.push({id:uid('l'),fromId:u.id,fromName:u.name,trigger:LL_TRIG,text:t,unlocked:LL_TRIG==='open-now',createdAt:new Date().toISOString()});await save();showToast('Letter saved!');renderLetters();}
-async function unlockL(id){var u=curUser();var c=coupleOf(u);var l=(c.letters||[]).find(function(x){return x.id===id;});if(l){l.unlocked=true;await save();renderLetters();}}
+async function sendLetter(){var u=curUser();var c=coupleOf(u);var t=document.getElementById('lt').value.trim();if(!t)return showToast('Write something first');var ok=await persistCoupleLatest(c,async function(latest){latest.letters=latest.letters||[];latest.letters.push({id:uid('l'),fromId:u.id,fromName:u.name,trigger:LL_TRIG,text:t,unlocked:LL_TRIG==='open-now',createdAt:new Date().toISOString()});});if(!ok)return showToast('Could not save the letter. Please try again.');showToast('Letter saved!');renderLetters();}
+async function unlockL(id){var u=curUser();var c=coupleOf(u);var ok=await persistCoupleLatest(c,async function(latest){var l=(latest.letters||[]).find(function(x){return x.id===id;});if(l)l.unlocked=true;});if(ok)renderLetters();}
 
 function renderProfile(){
   var u=curUser();var p=partnerOf(u);var c=coupleOf(u);var sp=u.sparkProfile||{};
@@ -2888,6 +2912,7 @@ function cpInv(){var u=curUser();var link=DUOSPARK_APP_URL+'?invite='+u.inviteCo
 // INIT
 // ============================================================
 init();
+window.addEventListener('beforeunload',function(){stopSharedPolling();});
 </script>
 </body>
 </html>
