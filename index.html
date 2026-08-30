@@ -2265,6 +2265,9 @@ function genCode(){var c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',s='';for(var i=0;i<6
 function curUser(){return SESSION.currentUserId?APP_DATA.users[SESSION.currentUserId]:null;}
 function partnerOf(u){return u&&u.partnerId?APP_DATA.users[u.partnerId]:null;}
 function coupleOf(u){return u&&u.coupleId?APP_DATA.couples[u.coupleId]:null;}
+function todayKey(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function currentSparkKey(){return todayKey();}
+function activeDateOf(c){return c&&c.activeDate&&c.activeDate.status==='active'?c.activeDate:null;}
 function prettyMode(m){return{'newly-dating':'Newly dating','long-distance':'Long-distance','engaged':'Engaged but apart','living-together':'Living together'}[m]||m;}
 function prettyDur(d){return{'less-6m':'< 6 months','6m-2y':'6m–2y','2y-5y':'2–5 years','5y+':'5+ years'}[d]||'—';}
 function todayStr(){return new Date().toLocaleDateString('en-IN',{weekday:'long',month:'long',day:'numeric'});}
@@ -2333,9 +2336,24 @@ async function syncSharedState(showConnectedToast){
       renderApp();return true;
     }
     if(coupleChanged){
-      // Keep the user on the dashboard and refresh only the visible home data.
+      // Shared data can change on any screen. Refresh the screen the user is
+      // actually looking at instead of only refreshing Home.
       var active=document.querySelector('.ascreen.active');
-      if(active&&active.id==='asc-home')renderHome();
+      if(active){
+        var sid=active.id.replace('asc-','');
+        if(sid==='home')renderHome();
+        else if(sid==='memory')renderMemoryWall();
+        else if(sid==='letters')renderLetters();
+        else if(sid==='room')renderRoom();
+        else if(sid==='discover')renderDiscover();
+        else if(sid==='profile')renderProfile();
+      }
+      // If the other partner starts a shared Date Room, bring the partner
+      // into the same room so the session starts together.
+      var ad=APP_DATA.couples[u.coupleId]&&APP_DATA.couples[u.coupleId].activeDate;
+      if(ad&&ad.status==='active'&&ad.startedBy&&ad.startedBy!==u.id&&(!active||active.id!=='asc-room')){
+        goScreen('room');
+      }
       return true;
     }
     return false;
@@ -2814,9 +2832,9 @@ function generateDeck(u) {
 function renderHome(){
   var u=curUser();var p=partnerOf(u);var couple=coupleOf(u);
   var done=couple?(couple.completedDates||[]).length:0,upcoming=couple?(couple.matchedDates||[]).filter(function(m){return m.status==='matched';}).length:0,letters=couple?(couple.letters||[]).length:0;
-  var dayIdx=Math.floor(Date.now()/86400000)%DAILY_SPARKS.length,sparkQ=DAILY_SPARKS[dayIdx];
-  var myAns=couple&&(couple.sparkAnswers||[]).find(function(a){return a.userId===u.id&&a.qIdx===dayIdx;});
-  var pAns=couple&&(couple.sparkAnswers||[]).find(function(a){return a.userId===u.partnerId&&a.qIdx===dayIdx;});
+  var dayNumber=Math.floor(Date.now()/86400000),dayIdx=dayNumber%DAILY_SPARKS.length,sparkQ=DAILY_SPARKS[dayIdx],sparkDay=currentSparkKey();
+  var myAns=couple&&(couple.sparkAnswers||[]).find(function(a){return a.userId===u.id&&(a.dayKey===sparkDay||(a.qIdx===dayIdx&&a.createdAt&&a.createdAt.slice(0,10)===sparkDay));});
+  var pAns=couple&&(couple.sparkAnswers||[]).find(function(a){return a.userId===u.partnerId&&(a.dayKey===sparkDay||(a.qIdx===dayIdx&&a.createdAt&&a.createdAt.slice(0,10)===sparkDay));});
   var deck=generateDeck(u);
   var banner='';
   if(!couple){var link=DUOSPARK_APP_URL+'?invite='+u.inviteCode;var wm=encodeURIComponent('Hey '+u.partnerName+', join me on DuoSpark: '+link);banner='<div class="inv-banner"><h3><i class="ti ti-clock-hour-3" style="color:var(--coral)"></i> Waiting for '+he(u.partnerName)+'</h3><p style="font-size:13px;color:var(--inks)">Send them this link — takes 90 seconds:</p><div class="inv-lr"><input type="text" id="hl" value="'+link+'" readonly/><button class="copy-btn" onclick="cpHL()">Copy</button></div><a class="wa-btn" href="https://wa.me/?text='+wm+'" target="_blank"><i class="ti ti-brand-whatsapp"></i> Send via WhatsApp</a></div>';}
@@ -2830,14 +2848,41 @@ function cpHL(){var i=document.getElementById('hl');i.select();document.execComm
 function renderDeckCard(d,u,couple){
   var dt=DATES[d.key];
   var matched=couple&&(couple.matchedDates||[]).find(function(m){return m.dateKey===d.key&&m.status==='matched';});
+  var completed=couple&&(couple.completedDates||[]).some(function(m){return m.dateKey===d.key;});
+  var active=activeDateOf(couple); 
   var iSw=couple&&(couple.matchedDates||[]).find(function(m){return m.dateKey===d.key&&m.swipes&&m.swipes[u.id]==='right';});
   var pSw=couple&&u.partnerId&&(couple.matchedDates||[]).find(function(m){return m.dateKey===d.key&&m.swipes&&m.swipes[u.partnerId]==='right';});
   var acts,sb='';
-  if(matched){acts='<button class="dk-btn sw" disabled><i class="ti ti-check"></i> Matched</button><button class="dk-btn ps" onclick="openDate(\''+d.key+'\')"><i class="ti ti-eye"></i> View</button>';sb='<div class="dk-st mtch"><i class="ti ti-confetti"></i> Both swiped right — match!</div>';}
-  else if(iSw&&!pSw){acts='<button class="dk-btn sw" disabled><i class="ti ti-heart"></i> You loved it</button><button class="dk-btn ps" onclick="openDate(\''+d.key+'\')"><i class="ti ti-eye"></i> View</button>';sb='<div class="dk-st">Waiting for '+he(u.partnerName||'partner')+' to swipe</div>';}
-  else if(pSw&&!iSw){acts='<button class="dk-btn ps" onclick="swipeDeck(\''+d.key+'\',\'left\')">Pass</button><button class="dk-btn lk" onclick="swipeDeck(\''+d.key+'\',\'right\')"><i class="ti ti-heart"></i> Love it</button>';sb='<div class="dk-st">'+he(u.partnerName||'Your partner')+' loved it — your turn!</div>';}
-  else{acts='<button class="dk-btn ps" onclick="swipeDeck(\''+d.key+'\',\'left\')">Pass</button><button class="dk-btn lk" onclick="swipeDeck(\''+d.key+'\',\'right\')"><i class="ti ti-heart"></i> Love it</button>';}
-  return'<div class="dk '+(matched?'mtch':'')+'"><div class="dk-art '+dt.artClass+'"><i class="ti '+dt.icon+'"></i></div><h3>'+he(dt.title)+'</h3><p>'+he(dt.desc)+'</p><div class="dk-tags">'+dt.tags.map(function(t){return'<span class="dk-tag">'+he(t)+'</span>';}).join('')+'</div><div class="dk-acts">'+acts+'</div>'+sb+'</div>';
+  if(completed){
+    acts='<button class="dk-btn sw" disabled><i class="ti ti-check"></i> Finished</button><button class="dk-btn ps" onclick="goScreen(\'memory\')"><i class="ti ti-photo-heart"></i> Memory</button>';
+    sb='<div class="dk-st mtch"><i class="ti ti-confetti"></i> You already made this memory.</div><button class="dk-btn lk" style="margin-top:7px" onclick="restartDate(\''+d.key+'\')"><i class="ti ti-refresh"></i> Restart date</button>';
+  } else if(active&&active.dateKey===d.key){
+    acts='<button class="dk-btn sw" disabled><i class="ti ti-flame"></i> Live now</button><button class="dk-btn ps" onclick="goScreen(\'room\')"><i class="ti ti-player-play"></i> Continue</button>';
+    sb='<div class="dk-st mtch"><i class="ti ti-users"></i> Started together · live for both</div>';
+  } else if(matched){
+    acts='<button class="dk-btn sw" disabled><i class="ti ti-check"></i> Matched</button><button class="dk-btn ps" onclick="startRoom(\''+d.key+'\')"><i class="ti ti-flame"></i> Start together</button>';
+    sb='<div class="dk-st mtch"><i class="ti ti-confetti"></i> Both swiped right — ready to start together.</div>';
+  } else if(iSw&&!pSw){
+    acts='<button class="dk-btn sw" disabled><i class="ti ti-heart"></i> You loved it</button><button class="dk-btn ps" onclick="openDate(\''+d.key+'\')">View</button>';sb='<div class="dk-st">Waiting for '+he(u.partnerName||'partner')+' to swipe</div>';
+  } else if(pSw&&!iSw){
+    acts='<button class="dk-btn ps" onclick="swipeDeck(\''+d.key+'\',\'left\')">Pass</button><button class="dk-btn lk" onclick="swipeDeck(\''+d.key+'\',\'right\')"><i class="ti ti-heart"></i> Love it</button>';sb='<div class="dk-st">'+he(u.partnerName||'Your partner')+' loved it — your turn!</div>';
+  } else {acts='<button class="dk-btn ps" onclick="swipeDeck(\''+d.key+'\',\'left\')">Pass</button><button class="dk-btn lk" onclick="swipeDeck(\''+d.key+'\',\'right\')"><i class="ti ti-heart"></i> Love it</button>';}
+  return'<div class="dk '+(matched||completed||active&&active.dateKey===d.key?'mtch':'')+'"><div class="dk-art '+dt.artClass+'"><i class="ti '+dt.icon+'"></i></div><h3>'+he(dt.title)+'</h3><p>'+he(dt.desc)+'</p><div class="dk-tags">'+dt.tags.map(function(t){return'<span class="dk-tag">'+he(t)+'</span>';}).join('')+'</div><div class="dk-acts">'+acts+'</div>'+sb+'</div>';
+}
+
+async function restartDate(key){
+  var u=curUser();if(!u||!u.coupleId)return;
+  try{
+    await persistCoupleLatest(u.coupleId,async function(c){
+      c.activeDate={dateKey:key,status:'active',startedAt:new Date().toISOString(),startedBy:u.id,stepIdx:0};
+      c.matchedDates=c.matchedDates||[];
+      var m=c.matchedDates.find(function(x){return x.dateKey===key;});
+      if(!m){m={id:uid('m'),dateKey:key,swipes:{},createdAt:new Date().toISOString()};c.matchedDates.push(m);}
+      m.status='matched';m.matchedAt=m.matchedAt||new Date().toISOString();
+    });
+    ROOM={dateKey:key,stepIdx:0,startTime:Date.now(),reactions:[],ti:null};
+    goScreen('room');
+  }catch(e){console.error(e);showToast('Could not restart the date. Please try again.');}
 }
 
 async function swipeDeck(key,dir){
@@ -2863,17 +2908,20 @@ async function swipeDeck(key,dir){
 
 
 async function sendSpark(idx){
-  var u=curUser();var t=document.getElementById('sp-txt').value.trim();
+  var u=curUser();var el=document.getElementById('sp-txt');var t=el?el.value.trim():'';
   if(!u||!u.coupleId)return showToast('Your couple is not connected yet');
   if(!t)return showToast('Write your answer first');
+  var dayKey=currentSparkKey();
   try{
     await persistCoupleLatest(u.coupleId,async function(c){
       c.sparkAnswers=c.sparkAnswers||[];
-      var existing=c.sparkAnswers.find(function(a){return a.userId===u.id&&a.qIdx===idx;});
-      if(existing){existing.text=t;existing.updatedAt=new Date().toISOString();}
-      else c.sparkAnswers.push({id:uid('sp'),userId:u.id,qIdx:idx,text:t,createdAt:new Date().toISOString()});
+      // Only one answer per person per calendar day. Keep old answers in the
+      // shared record, but the Home screen only displays today's one.
+      var existing=c.sparkAnswers.find(function(a){return a.userId===u.id&&a.dayKey===dayKey;});
+      if(existing){existing.text=t;existing.updatedAt=new Date().toISOString();existing.qIdx=idx;}
+      else c.sparkAnswers.push({id:uid('sp'),userId:u.id,qIdx:idx,dayKey:dayKey,text:t,createdAt:new Date().toISOString()});
     });
-    showToast('Saved!');
+    showToast('Saved — your partner can see it.');
     renderHome();
   }catch(e){console.error('spark sync failed',e);showToast('Could not save your answer. Please try again.');}
 }
@@ -2906,29 +2954,94 @@ function openDate(key){
 }
 
 function renderRoom(){
-  var u=curUser();var couple=coupleOf(u);
-  var matched=couple&&(couple.matchedDates||[]).find(function(m){return m.status==='matched';});
-  if(!matched){document.getElementById('asc-room').innerHTML='<div class="room-empty"><i class="ti ti-flame"></i><h2>No date active.</h2><p>When both partners swipe right on the same date, it\'ll appear here at Saturday 9 PM.</p><button class="btn btn-coral" onclick="goScreen(\'home\')">Back to Home</button></div>';return;}
-  if(!ROOM.dateKey)startRoom(matched.dateKey);else renderRoomActive();
+  var u=curUser();var couple=coupleOf(u);var active=activeDateOf(couple);
+  if(!active){
+    var matched=couple&&(couple.matchedDates||[]).find(function(m){return m.status==='matched';});
+    if(!matched){document.getElementById('asc-room').innerHTML='<div class="room-empty"><i class="ti ti-flame"></i><h2>No date active.</h2><p>Match a date first. Once one partner starts it, the same session begins for both of you.</p><button class="btn btn-coral" onclick="goScreen(\'home\')">Back to Home</button></div>';return;}
+    document.getElementById('asc-room').innerHTML='<div class="room-empty"><i class="ti ti-users"></i><h2>Ready when you are.</h2><p>'+he(DATES[matched.dateKey].title)+' is matched. Start it once and DuoSpark will start the same session for both of you.</p><button class="btn btn-coral" onclick="startRoom(\''+matched.dateKey+'\')">Start together <i class="ti ti-flame"></i></button></div>';return;
+  }
+  if(!ROOM.dateKey||ROOM.dateKey!==active.dateKey||ROOM.startRemoteAt!==active.startedAt){
+    if(ROOM.ti)clearInterval(ROOM.ti);
+    ROOM={dateKey:active.dateKey,stepIdx:active.stepIdx||0,startTime:new Date(active.startedAt).getTime(),startRemoteAt:active.startedAt,reactions:[],ti:null};
+  }
+  ROOM.ti=ROOM.ti||setInterval(updateTimer,1000);
+  renderRoomActive();
 }
-function startRoom(key){if(ROOM.ti)clearInterval(ROOM.ti);ROOM={dateKey:key,stepIdx:0,startTime:Date.now(),reactions:[],ti:null};ROOM.ti=setInterval(updateTimer,1000);renderRoomActive();goScreen('room');}
+async function startRoom(key){
+  var u=curUser();if(!u||!u.coupleId)return showToast('Your couple is not connected yet');
+  try{
+    var latest=await persistCoupleLatest(u.coupleId,async function(c){
+      var existing=activeDateOf(c);
+      if(existing&&existing.dateKey===key)return;
+      c.activeDate={dateKey:key,status:'active',startedAt:new Date().toISOString(),startedBy:u.id,stepIdx:0};
+      c.matchedDates=c.matchedDates||[];
+      var m=c.matchedDates.find(function(x){return x.dateKey===key;});
+      if(m)m.status='matched';
+    });
+    var a=latest.activeDate;
+    if(ROOM.ti)clearInterval(ROOM.ti);
+    ROOM={dateKey:a.dateKey,stepIdx:a.stepIdx||0,startTime:new Date(a.startedAt).getTime(),startRemoteAt:a.startedAt,reactions:[],ti:setInterval(updateTimer,1000)};
+    goScreen('room');
+    showToast('Date Room started together ❤️');
+  }catch(e){console.error('start room failed',e);showToast('Could not start the date together. Please try again.');}
+}
 function renderRoomActive(){
-  var d=DATES[ROOM.dateKey];var u=curUser();var p=partnerOf(u);
-  var dots=d.steps.map(function(_,i){return'<div class="rdot '+(i<ROOM.stepIdx?'dn':i===ROOM.stepIdx?'cr':'')+'" ></div>';}).join('');
-  var step=d.steps[ROOM.stepIdx];var waLink='https://wa.me/'+(p?p.whatsapp.replace(/[^0-9]/g,''):'');
-  document.getElementById('asc-room').innerHTML='<div class="room-shell"><div class="room-name"><h2>'+he(d.title)+'</h2><p>Live · '+(p?'With '+he(p.name):'Solo preview')+'</p></div><div class="room-timer"><div class="t" id="rt-time">00:00</div><div class="sl">Step '+(ROOM.stepIdx+1)+' of '+d.steps.length+'</div></div><div class="rgrid"><div class="rm"><div class="rdots">'+dots+'</div><div class="rstep"><div class="lb">Current step</div><h3>'+he(step.text.split('.')[0])+'</h3>'+(step.time!=='—'?'<div class="st">'+he(step.time)+'</div>':'')+'<p>'+he(step.text)+'</p><div class="rstep-acts">'+(ROOM.stepIdx<d.steps.length-1?'<button class="btn btn-coral" onclick="nextStep()">Done — next step <i class="ti ti-arrow-right"></i></button>':'<button class="btn btn-coral" onclick="finishDate(\''+ROOM.dateKey+'\')">Finish date <i class="ti ti-confetti"></i></button>')+(ROOM.stepIdx>0?'<button class="btn btn-paper" onclick="prevStep()"><i class="ti ti-arrow-left"></i> Back</button>':'')+'</div></div></div><div class="rside"><div class="rpanel"><h5>Video call</h5><div class="rvid"><i class="ti ti-video"></i><span>Open WhatsApp video</span><a href="'+waLink+'" target="_blank">Open WhatsApp</a></div></div><div class="rpanel"><h5>Now playing</h5><div class="rmusic"><div class="rmusic-ico"><i class="ti ti-music"></i></div><div class="rmusic-inf"><strong>Coriander & Coconut</strong><span>Synced playlist</span></div></div></div><div class="rpanel"><h5>Send a moment</h5><div class="rreacts"><button class="rrr" onclick="sendReact(\'❤️\')">❤️</button><button class="rrr" onclick="sendReact(\'😂\')">😂</button><button class="rrr" onclick="sendReact(\'✨\')">✨</button></div><div class="rfeed" id="rfeed">'+ROOM.reactions.map(function(r){return'<div>'+r+'</div>';}).join('')+'</div></div></div></div></div>';
+  var d=DATES[ROOM.dateKey];var u=curUser();var p=partnerOf(u);if(!d)return;
+  var idx=Math.min(ROOM.stepIdx||0,d.steps.length-1);
+  var dots=d.steps.map(function(_,i){return'<div class="rdot '+(i<idx?'dn':i===idx?'cr':'')+'"></div>';}).join('');
+  var step=d.steps[idx];var waLink='https://wa.me/'+(p?p.whatsapp.replace(/[^0-9]/g,''):'');
+  document.getElementById('asc-room').innerHTML='<div class="room-shell"><div class="room-name"><h2>'+he(d.title)+'</h2><p>Live · '+(p?'With '+he(p.name):'Solo preview')+'</p></div><div class="room-timer"><div class="t" id="rt-time">00:00</div><div class="sl">Step '+(idx+1)+' of '+d.steps.length+'</div></div><div class="rgrid"><div class="rm"><div class="rdots">'+dots+'</div><div class="rstep"><div class="lb">Current step</div><h3>'+he(step.text.split('.')[0])+'</h3>'+(step.time!=='—'?'<div class="st">'+he(step.time)+'</div>':'')+'<p>'+he(step.text)+'</p><div class="rstep-acts">'+(idx<d.steps.length-1?'<button class="btn btn-coral" onclick="nextStep()">Done — next step <i class="ti ti-arrow-right"></i></button>':'<button class="btn btn-coral" onclick="finishDate(\''+ROOM.dateKey+'\')">Finish date <i class="ti ti-confetti"></i></button>')+(idx>0?'<button class="btn btn-paper" onclick="prevStep()"><i class="ti ti-arrow-left"></i> Back</button>':'')+'</div></div></div><div class="rside"><div class="rpanel"><h5>Video call</h5><div class="rvid"><i class="ti ti-video"></i><span>Open WhatsApp video</span><a href="'+waLink+'" target="_blank">Open WhatsApp</a></div></div><div class="rpanel"><h5>Now playing</h5><div class="rmusic"><div class="rmusic-ico"><i class="ti ti-music"></i></div><div class="rmusic-inf"><strong>Coriander & Coconut</strong><span>Synced playlist</span></div></div></div><div class="rpanel"><h5>Send a moment</h5><div class="rreacts"><button class="rrr" onclick="sendReact(\'❤️\')">❤️</button><button class="rrr" onclick="sendReact(\'😂\')">😂</button><button class="rrr" onclick="sendReact(\'✨\')">✨</button></div><div class="rfeed" id="rfeed">'+ROOM.reactions.map(function(r){return'<div>'+r+'</div>';}).join('')+'</div></div></div></div></div>';
+  updateTimer();
 }
+
 function updateTimer(){var el=document.getElementById('rt-time');if(!el){clearInterval(ROOM.ti);return;}var s=Math.floor((Date.now()-ROOM.startTime)/1000),m=Math.floor(s/60);s=s%60;el.textContent=(m<10?'0':'')+m+':'+(s<10?'0':'')+s;}
-function nextStep(){if(ROOM.stepIdx<DATES[ROOM.dateKey].steps.length-1){ROOM.stepIdx++;renderRoomActive();}}
-function prevStep(){if(ROOM.stepIdx>0){ROOM.stepIdx--;renderRoomActive();}}
+async function nextStep(){
+  if(ROOM.stepIdx>=DATES[ROOM.dateKey].steps.length-1)return;
+  var u=curUser();if(!u||!u.coupleId)return;
+  try{
+    var next=ROOM.stepIdx+1;
+    var latest=await persistCoupleLatest(u.coupleId,async function(c){if(c.activeDate&&c.activeDate.dateKey===ROOM.dateKey&&c.activeDate.status==='active')c.activeDate.stepIdx=next;});
+    ROOM.stepIdx=latest.activeDate&&latest.activeDate.dateKey===ROOM.dateKey?(latest.activeDate.stepIdx||next):next;
+    renderRoomActive();
+  }catch(e){console.error(e);showToast('Could not sync this step. Please try again.');}
+}
+async function prevStep(){
+  if(ROOM.stepIdx<=0)return;
+  var u=curUser();if(!u||!u.coupleId)return;
+  try{
+    var prev=ROOM.stepIdx-1;
+    var latest=await persistCoupleLatest(u.coupleId,async function(c){if(c.activeDate&&c.activeDate.dateKey===ROOM.dateKey&&c.activeDate.status==='active')c.activeDate.stepIdx=prev;});
+    ROOM.stepIdx=latest.activeDate&&latest.activeDate.dateKey===ROOM.dateKey?(latest.activeDate.stepIdx||prev):prev;
+    renderRoomActive();
+  }catch(e){console.error(e);showToast('Could not sync this step. Please try again.');}
+}
 function sendReact(emoji){ROOM.reactions.unshift(emoji+' You sent '+emoji+' to '+(partnerOf(curUser())||{name:'partner'}).name);var f=document.getElementById('rfeed');if(f)f.innerHTML=ROOM.reactions.map(function(r){return'<div>'+r+'</div>';}).join('');}
 
 async function finishDate(key){
   if(ROOM.ti)clearInterval(ROOM.ti);var d=DATES[key];
   document.querySelectorAll('.ascreen').forEach(function(e){e.classList.remove('active');});document.getElementById('asc-complete').classList.add('active');
-  document.getElementById('asc-complete').innerHTML='<div class="complete-box"><i class="ti ti-confetti"></i><h2>Date complete!</h2><p>Write a one-line note — saved to your Memory Wall.</p><div class="cphotos"><div class="cp coral"><i class="ti '+d.icon+'"></i></div><div class="cp sage"><i class="ti '+d.icon+'"></i></div></div><label style="font-size:11px;color:var(--inkm);font-family:DM Mono,monospace;text-transform:uppercase;letter-spacing:.1em;font-weight:500">Your one-line note</label><textarea id="cn" placeholder="e.g. His curry looked like soup but he tried 😄"></textarea><button class="btn btn-coral btn-block" onclick="saveMemory(\''+key+'\')">Save to Memory Wall <i class="ti ti-photo-heart"></i></button><button class="btn btn-paper btn-block" style="margin-top:7px" onclick="goScreen(\'home\')">Skip for now</button></div>';
+  document.getElementById('asc-complete').innerHTML='<div class="complete-box"><i class="ti ti-confetti"></i><h2>Date complete!</h2><p>Write a one-line note — saved to your shared Memory Wall.</p><div class="cphotos"><div class="cp coral"><i class="ti '+d.icon+'"></i></div><div class="cp sage"><i class="ti '+d.icon+'"></i></div></div><label style="font-size:11px;color:var(--inkm);font-family:DM Mono,monospace;text-transform:uppercase;letter-spacing:.1em;font-weight:500">Your one-line note</label><textarea id="cn" placeholder="e.g. His curry looked like soup but he tried 😄"></textarea><button class="btn btn-coral btn-block" onclick="saveMemory(\''+key+'\')">Save to Memory Wall <i class="ti ti-photo-heart"></i></button><button class="btn btn-paper btn-block" style="margin-top:7px" onclick="goScreen(\'home\')">Skip for now</button></div>';
 }
-async function saveMemory(key){var u=curUser();var c=coupleOf(u);var note=document.getElementById('cn').value.trim()||'A great date night.';c.completedDates=c.completedDates||[];c.completedDates.push({id:uid('cd'),dateKey:key,completedAt:new Date().toISOString(),note1:note,userId1:u.id});var m=(c.matchedDates||[]).find(function(x){return x.dateKey===key;});if(m)m.status='completed';await save();showToast('Saved to Memory Wall!');goScreen('memory');}
+async function saveMemory(key){
+  var u=curUser();if(!u||!u.coupleId)return showToast('Your couple is not connected yet');
+  var note=document.getElementById('cn').value.trim()||'A great date night.';
+  try{
+    var latest=await persistCoupleLatest(u.coupleId,async function(c){
+      c.completedDates=c.completedDates||[];
+      var mem=c.completedDates.find(function(x){return x.dateKey===key&&!x.completedAt;})||c.completedDates.find(function(x){return x.dateKey===key&&x.userId1===u.id;});
+      if(!mem){
+        mem={id:uid('cd'),dateKey:key,completedAt:new Date().toISOString(),note1:'',note2:'',userId1:null,userId2:null};
+        c.completedDates.push(mem);
+      }
+      if(!mem.completedAt)mem.completedAt=new Date().toISOString();
+      if(mem.userId1===u.id||!mem.userId1){mem.userId1=u.id;mem.note1=note;}
+      else {mem.userId2=u.id;mem.note2=note;}
+      c.activeDate=null;
+      var m=(c.matchedDates||[]).find(function(x){return x.dateKey===key;});if(m)m.status='completed';
+    });
+    APP_DATA.couples[u.coupleId]=latest;showToast('Saved to your shared Memory Wall!');goScreen('memory');
+  }catch(e){console.error('memory save failed',e);showToast('Could not save the memory. Please try again.');}
+}
 
 function renderMemoryWall(){
   var u=curUser();var c=coupleOf(u);var done=c?(c.completedDates||[]).slice().reverse():[];
@@ -2943,8 +3056,25 @@ function renderLetters(){
   document.getElementById('asc-letters').innerHTML='<h1 class="pg-title">Letter Locker</h1><div class="pg-sub">Write letters. Time-lock them for special moments.</div><div class="ll-grid"><div class="ll-blk"><h3>Write to '+he(p?p.name:u.partnerName)+'</h3><textarea id="lt" placeholder="Write something real..."></textarea><div class="trigs">'+Object.keys(trigLabels).map(function(t){return'<div class="trig '+(LL_TRIG===t?'on':'')+'" onclick="setTrig(\''+t+'\')">'+trigLabels[t]+'</div>';}).join('')+'</div>'+(c?'<button class="btn btn-coral" onclick="sendLetter()">Send letter <i class="ti ti-send"></i></button>':'<p style="font-size:12px;color:var(--inkm);font-style:italic">You\'ll be able to send letters once your partner joins.</p>')+'</div><div class="ll-blk"><h3>Letters</h3>'+(letters.length?'<div class="ll-list">'+letters.map(function(l){var lk=l.trigger!=='open-now'&&!l.unlocked;return'<div class="li-item"><div class="li-head"><span class="li-tag">'+he(trigLabels[l.trigger]||l.trigger)+'</span><span class="li-date">'+new Date(l.createdAt).toLocaleDateString('en-IN',{month:'short',day:'numeric'})+'</span></div><div class="li-txt '+(lk?'li-lk':'')+'">'+( lk?'🔒 Locked until triggered.':'<em style="font-family:Fraunces,serif;font-style:italic">'+he(l.text)+'</em>')+'</div><div class="li-from">from '+he(l.fromName)+'</div>'+(lk?'<button class="btn btn-paper" style="margin-top:6px;font-size:11px;padding:5px 11px" onclick="unlockL(\''+l.id+'\')">Unlock now</button>':'')+'</div>';}).join('')+'</div>':'<p style="font-size:13px;color:var(--inkm);font-style:italic">No letters yet. Write one.</p>')+'</div></div>';
 }
 function setTrig(t){LL_TRIG=t;renderLetters();}
-async function sendLetter(){var u=curUser();var c=coupleOf(u);var t=document.getElementById('lt').value.trim();if(!t)return showToast('Write something first');c.letters=c.letters||[];c.letters.push({id:uid('l'),fromId:u.id,fromName:u.name,trigger:LL_TRIG,text:t,unlocked:LL_TRIG==='open-now',createdAt:new Date().toISOString()});await save();showToast('Letter saved!');renderLetters();}
-async function unlockL(id){var u=curUser();var c=coupleOf(u);var l=(c.letters||[]).find(function(x){return x.id===id;});if(l){l.unlocked=true;await save();renderLetters();}}
+async function sendLetter(){
+  var u=curUser();var c=coupleOf(u);var el=document.getElementById('lt');var t=el?el.value.trim():'';
+  if(!t)return showToast('Write something first');if(!u||!u.coupleId)return showToast('Your couple is not connected yet');
+  try{
+    await persistCoupleLatest(u.coupleId,async function(latest){
+      latest.letters=latest.letters||[];
+      latest.letters.push({id:uid('l'),fromId:u.id,fromName:u.name,recipientId:u.partnerId,trigger:LL_TRIG,text:t,unlocked:LL_TRIG==='open-now',createdAt:new Date().toISOString()});
+    });
+    showToast('Letter sent to '+(u.partnerName||'your partner')+' ❤️');
+    renderLetters();
+  }catch(e){console.error('letter sync failed',e);showToast('Could not send the letter. Please try again.');}
+}
+async function unlockL(id){
+  var u=curUser();var c=coupleOf(u);if(!u||!u.coupleId)return;
+  try{
+    await persistCoupleLatest(u.coupleId,async function(latest){var l=(latest.letters||[]).find(function(x){return x.id===id;});if(l)l.unlocked=true;});
+    renderLetters();
+  }catch(e){console.error(e);showToast('Could not unlock the letter. Please try again.');}
+}
 
 function renderProfile(){
   var u=curUser();var p=partnerOf(u);var c=coupleOf(u);var sp=u.sparkProfile||{};
