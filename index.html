@@ -24,7 +24,7 @@ body::before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.5;z-
 /* BUTTONS */
 .btn{display:inline-flex;align-items:center;gap:7px;padding:11px 20px;border-radius:100px;font-size:14px;font-weight:500;cursor:pointer;border:none;font-family:inherit;transition:all .2s;text-decoration:none}
 .btn-coral{background:var(--coral);color:var(--paper)}.btn-coral:hover{background:var(--corald)}
-.btn-ink{background:var(--ink);color:var(--paper)}.btn-ink:hover{background:var(--coral)}
+.btn-ink{background:var(--coral);color:var(--paper)}.btn-ink:hover{background:var(--corald)}
 .btn-ghost{background:transparent;color:var(--ink);border:.5px solid var(--ink)}.btn-ghost:hover{background:var(--ink);color:var(--paper)}
 .btn-paper{background:var(--paper);color:var(--ink);border:.5px solid var(--ls)}.btn-paper:hover{background:var(--cream)}
 .dk-art{position:relative;overflow:hidden}.dk-art:after{content:'';position:absolute;width:90px;height:90px;border-radius:50%;right:-25px;bottom:-28px;background:rgba(255,255,255,.32)}.dk-art .ti{position:relative;z-index:1;filter:drop-shadow(0 3px 5px rgba(31,22,17,.08))}.auth-google .ti{font-size:18px}.auth-email .ti{font-size:17px}.auth-btn{width:100%;justify-content:center;padding:12px 16px;border-radius:100px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .2s}.auth-google{background:#fff;color:var(--ink);border:.5px solid var(--lm)}.auth-google:hover{background:var(--cream);border-color:var(--coral)}.auth-email{background:var(--coral);color:var(--paper);border:none}.auth-email:hover{background:var(--corald)}.auth-divider{display:flex;align-items:center;gap:10px;margin:16px 0;color:var(--inkm);font:11px 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.12em}.auth-divider:before,.auth-divider:after{content:'';height:.5px;background:var(--ls);flex:1}.auth-note{font-size:11px;color:var(--inkm);line-height:1.5;margin-top:8px}.hero-visual-note{font:11px 'DM Mono',monospace;text-transform:uppercase;letter-spacing:.14em;color:var(--coral);margin-top:14px}
@@ -2332,13 +2332,13 @@ async function finishAuthSession(session){
     ONB.draft.email=email;ONB.draft.authUserId=au.id;startOnboarding('signup',{});ONB.draft.email=email;renderStep();return true;
   }catch(e){console.warn('Auth session mapping failed',e);showToast('Could not connect this sign-in to DuoSpark.');return false;}
 }
-async function sendEmailSignIn(){
+async function signInPassword(){
   var e=(document.getElementById('si-email')||{}).value||'';e=e.trim().toLowerCase();
+  var pw=(document.getElementById('si-password')||{}).value||'';
   if(!e||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))return showToast('Enter a valid email address');
-  try{
-    var r=await DS_SUPABASE.auth.signInWithOtp({email:e,options:{emailRedirectTo:DUOSPARK_APP_URL}});if(r.error)throw r.error;
-    showToast('Check your email for the DuoSpark sign-in link.');
-  }catch(err){console.error(err);showToast('Could not send sign-in email. Check Supabase Auth email settings.');}
+  if(!pw)return showToast('Enter your password');
+  try{var r=await DS_SUPABASE.auth.signInWithPassword({email:e,password:pw});if(r.error)throw r.error;if(r.data&&r.data.session)await finishAuthSession(r.data.session);}
+  catch(err){console.error(err);showToast(err.message&&/email not confirmed/i.test(err.message)?'Please confirm your email first.':'Email or password is incorrect.');}
 }
 async function signInGoogle(){
   try{var r=await DS_SUPABASE.auth.signInWithOAuth({provider:'google',options:{redirectTo:DUOSPARK_APP_URL}});if(r.error)throw r.error;}
@@ -2497,6 +2497,8 @@ function r2(){
   var country=d.country||'India';
   card('<div class="eyebrow">Reach you</div><h2>How can we reach you?</h2><p class="lede sm">We use this for reminders and to personalize dates to your location.</p>'+
     '<div class="field"><label>Email</label><input type="email" id="f-email" value="'+he(d.email||'')+'" placeholder="riya@example.com" autocomplete="email" autofocus/></div>'+
+    '<div class="field"><label>Create a password</label><input type="password" id="f-password" value="" placeholder="At least 6 characters" autocomplete="new-password"/></div>'+
+    '<div class="field-help" style="margin-top:-8px;margin-bottom:14px">Use this password to sign back in anytime. Your password is handled securely by Supabase.</div>'+
     '<div class="field"><label>Phone / WhatsApp country</label><select id="f-country" onchange="updateGeoFields()">'+geoOptions(country)+'</select></div>'+
     '<div class="field-row"><div class="field"><label>Country code</label><input type="text" id="f-phone-code" value="'+he((DS_GEO[country]||DS_GEO.Other).code)+'" readonly/></div>'+
     '<div class="field"><label>Phone / WhatsApp number</label><input type="tel" id="f-wa" value="'+he(d.phone||'')+'" placeholder="9876543210" inputmode="numeric" autocomplete="tel"/></div></div>'+
@@ -2507,12 +2509,13 @@ function r2(){
   renderStates(country,d.state||'');
 }
 function sv2(){
-  var e=document.getElementById('f-email').value.trim().toLowerCase(),country=document.getElementById('f-country').value,code=(DS_GEO[country]||DS_GEO.Other).code,w=document.getElementById('f-wa').value.trim(),state=document.getElementById('f-state').value.trim(),c=document.getElementById('f-city').value.trim();
+  var e=document.getElementById('f-email').value.trim().toLowerCase(),pw=document.getElementById('f-password').value,country=document.getElementById('f-country').value,code=(DS_GEO[country]||DS_GEO.Other).code,w=document.getElementById('f-wa').value.trim(),state=document.getElementById('f-state').value.trim(),c=document.getElementById('f-city').value.trim();
   if(!e||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))return showToast('Please enter a valid email address');
+  if(!pw||pw.length<6)return showToast('Please create a password with at least 6 characters');
   if(!w||!validatePhone(country,w))return showToast('Please enter a valid '+country+' phone number');
   if(!state)return showToast('Please select your state / province');
   if(!c)return showToast('Please enter your city');
-  ONB.draft.email=e;ONB.draft.phone=w;ONB.draft.whatsapp=code+' '+phoneDigits(w);ONB.draft.phoneCountry=country;ONB.draft.phoneCode=code;ONB.draft.state=state;ONB.draft.city=c;onbNext();
+  ONB.draft.email=e;ONB.draft.password=pw;ONB.draft.phone=w;ONB.draft.whatsapp=code+' '+phoneDigits(w);ONB.draft.phoneCountry=country;ONB.draft.phoneCode=code;ONB.draft.state=state;ONB.draft.city=c;onbNext();
 }
 
 function r3(){
@@ -2587,12 +2590,15 @@ function r13(){
 
 async function r14(){
   if(ONB.isPartner){await finalizePartner();return;}
-  var userId=ONB.draft.authUserId||crypto.randomUUID(),code=genCode();
+  var code=genCode();
   var sp={duration:ONB.draft.duration,interests:ONB.draft.interests,loveLang:ONB.draft.loveLang,partnerLang:ONB.draft.partnerLang,diet:ONB.draft.diet,allergies:ONB.draft.allergies,budget:ONB.draft.budget,languages:ONB.draft.languages,freeTime:ONB.draft.freeTime,missing:ONB.draft.missing};
-  var user={id:userId,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:null,coupleId:null,mode:ONB.draft.mode,partnerName:ONB.draft.partnerName,partnerCity:ONB.draft.partnerCity,sparkProfile:sp,inviteCode:code,authUserId:ONB.draft.authUserId||null,createdAt:new Date().toISOString()};
+  var userId=ONB.draft.authUserId||crypto.randomUUID();
+  if(!ONB.draft.authUserId){
+    try{var ar=await DS_SUPABASE.auth.signUp({email:ONB.draft.email,password:ONB.draft.password});if(ar.error)throw ar.error;if(ar.data&&ar.data.user) {userId=ar.data.user.id;ONB.draft.authUserId=ar.data.user.id;}}catch(e){console.error(e);showToast(e.message&&/already registered/i.test(e.message)?'This email already has an account. Please sign in instead.':'Could not create your sign-in account. Please try again.');return;}
+  }
+  var user={id:userId,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:null,coupleId:null,mode:ONB.draft.mode,partnerName:ONB.draft.partnerName,partnerCity:ONB.draft.partnerCity,sparkProfile:sp,inviteCode:code,authUserId:userId,createdAt:new Date().toISOString()};
   var inv={creatorId:userId,createdAt:new Date().toISOString(),used:false,status:'pending'};
   try{await saveRemoteUser(user);await saveRemoteInvite(code,inv);}catch(e){console.error(e);showToast('Could not create your DuoSpark account. Please try again.');return;}
-  try{await DS_SUPABASE.auth.signInWithOtp({email:user.email,options:{emailRedirectTo:DUOSPARK_APP_URL}});}catch(e){console.warn('Could not send optional sign-in link',e);}
   APP_DATA.users[userId]=user;APP_DATA.invites[code]=inv;SESSION.currentUserId=userId;ONB.draft._uid=userId;ONB.draft._code=code;
   await save();await saveSess();
   var link=DUOSPARK_APP_URL+'?invite='+code;var waMsg=encodeURIComponent('Hey '+ONB.draft.partnerName+', I just signed up for DuoSpark — a date-night app for couples. Join me: '+link);
@@ -2614,9 +2620,10 @@ async function finalizePartner(){
     if(!crRes.data){showToast('Creator profile not found');showView('marketing');return;}
     var cr=crRes.data.profile_data||{};
     cr.id=crRes.data.id;cr.name=crRes.data.name||cr.name;cr.email=crRes.data.email||cr.email||'';
-    var uid2=crypto.randomUUID();
+    var uid2=ONB.draft.authUserId||crypto.randomUUID();
+    if(!ONB.draft.authUserId){var ar2=await DS_SUPABASE.auth.signUp({email:ONB.draft.email,password:ONB.draft.password});if(ar2.error)throw ar2.error;if(ar2.data&&ar2.data.user){uid2=ar2.data.user.id;ONB.draft.authUserId=uid2;}}
     var sp={duration:ONB.draft.duration,interests:ONB.draft.interests,loveLang:ONB.draft.loveLang,partnerLang:ONB.draft.partnerLang,diet:ONB.draft.diet,allergies:ONB.draft.allergies||'',budget:ONB.draft.budget,languages:ONB.draft.languages,freeTime:ONB.draft.freeTime,missing:ONB.draft.missing};
-    var user={id:uid2,authUserId:ONB.draft.authUserId||null,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:cr.id,coupleId:null,mode:cr.mode,partnerName:cr.name,partnerCity:cr.city,sparkProfile:sp,inviteCode:null,createdAt:new Date().toISOString()};
+    var user={id:uid2,authUserId:uid2,name:ONB.draft.name,age:ONB.draft.age,gender:ONB.draft.gender,email:ONB.draft.email,whatsapp:ONB.draft.whatsapp,city:ONB.draft.city,state:ONB.draft.state,country:ONB.draft.phoneCountry,phone:ONB.draft.phone,phoneCode:ONB.draft.phoneCode,partnerId:cr.id,coupleId:null,mode:cr.mode,partnerName:cr.name,partnerCity:cr.city,sparkProfile:sp,inviteCode:null,createdAt:new Date().toISOString()};
     var cid=crypto.randomUUID();
     var couple={id:cid,member1:cr.id,member2:uid2,mode:cr.mode,matchedDates:[],completedDates:[],letters:[],sparkAnswers:[],status:'connected',createdAt:new Date().toISOString(),pairedAt:new Date().toISOString()};
     cr.partnerId=uid2;cr.coupleId=cid;
@@ -2628,7 +2635,6 @@ async function finalizePartner(){
     // invite is consumed. This is what the creator's polling uses.
     var vr=await DS_SUPABASE.from('profiles').upsert({id:cr.id,name:cr.name||'',email:cr.email||'',profile_data:cr},{onConflict:'id'});if(vr.error)throw vr.error;
     var ur=await DS_SUPABASE.from('profiles').upsert({id:uid2,name:user.name||'',email:user.email||'',profile_data:user},{onConflict:'id'});if(ur.error)throw ur.error;
-    try{await DS_SUPABASE.auth.signInWithOtp({email:user.email,options:{emailRedirectTo:DUOSPARK_APP_URL}});}catch(e){console.warn('Could not send partner sign-in link',e);}
     APP_DATA.users[cr.id]=cr;APP_DATA.users[uid2]=user;APP_DATA.couples[cid]=couple;APP_DATA.invites[code]={id:invRow.id,creatorId:cr.id,coupleId:cid,used:true,status:'used',createdAt:invRow.created_at};
     SESSION.currentUserId=uid2;ONB.draft._uid=uid2;await save();await saveSess();onbNext();
   }catch(e){console.error('finalizePartner failed',e);showToast('Could not connect right now. Please try again.');}
@@ -2648,9 +2654,16 @@ function r15(){
 function enterApp(){showView('app');renderApp();}
 
 function renderSignIn(){
-  card('<div class="eyebrow">Welcome back</div><h2>Sign in to DuoSpark.</h2><p class="lede sm">Use your email for a magic link, or continue with Google. No password to remember.</p>'+    '<div class="field"><label>Email</label><input type="email" id="si-email" placeholder="riya@example.com" autocomplete="email" autofocus/></div>'+    '<button class="auth-btn auth-email" onclick="sendEmailSignIn()"><i class="ti ti-mail"></i> Send me a sign-in link</button>'+    '<div class="auth-divider">or</div>'+    '<button class="auth-btn auth-google" onclick="signInGoogle()"><i class="ti ti-brand-google"></i> Continue with Google</button>'+    '<p class="auth-note"><strong>Phone sign-in:</strong> not enabled in this free build because phone OTP requires an SMS provider. Your phone/WhatsApp number is still stored for DuoSpark features.</p>'+    '<p class="skip-ln">No account? <a onclick="startSignup()">Create one</a></p>');
+  card('<div class="eyebrow">Welcome back</div><h2>Sign in to DuoSpark.</h2><p class="lede sm">Use your email and password, or continue with Google.</p>'+
+    '<div class="field"><label>Email</label><input type="email" id="si-email" placeholder="riya@example.com" autocomplete="email" autofocus/></div>'+
+    '<div class="field"><label>Password</label><input type="password" id="si-password" placeholder="Your DuoSpark password" autocomplete="current-password" onkeydown="if(event.key===\'Enter\')signInPassword()"/></div>'+
+    '<button class="auth-btn auth-email" onclick="signInPassword()"><i class="ti ti-lock-open"></i> Sign in</button>'+
+    '<div class="auth-divider">or</div>'+
+    '<button class="auth-btn auth-google" onclick="signInGoogle()"><i class="ti ti-brand-google"></i> Continue with Google</button>'+
+    '<p class="auth-note">Your email and password are handled securely by Supabase. Phone/WhatsApp remains available for DuoSpark features.</p>'+
+    '<p class="skip-ln">No account? <a onclick="startSignup()">Create one</a></p>');
 }
-async function doSignIn(){return sendEmailSignIn();}
+async function doSignIn(){return signInPassword();}
 
 function rt(key,value,label,sub,fn){return'<div class="rt '+(ONB.draft[key]===value?'sel':'')+'" onclick="setF(\''+key+'\',\''+value+'\','+fn.name+')"><div class="rdot"></div><div><strong>'+he(label)+'</strong>'+(sub?'<span>'+he(sub)+'</span>':'')+'</div></div>';}
 function ss(key){if(!ONB.draft[key])return showToast('Please pick an option');onbNext();}
